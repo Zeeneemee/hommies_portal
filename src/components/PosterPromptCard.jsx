@@ -2,23 +2,31 @@ import React from 'react'
 import { useAction } from 'convex/react'
 import { Icon } from './ui.jsx'
 
-// Generate poster prompt card — base64-encodes the uploaded images in the
-// browser and ships them to the Gemini Convex action, which uses Vision to
-// look at the photos and write a brief informed by what it actually sees.
-// No static-template fallback: if Gemini fails, the card surfaces the error
-// note and Copy stays disabled until a real prompt is produced.
+// Generate poster prompt card — resizes the uploaded images down to a
+// Vision-appropriate size (max 1280 px wide, JPEG quality 0.82) before
+// base64-encoding and shipping to the Gemini Convex action. Phone photos
+// are typically 3–6 MB raw; resized they land around 100–300 KB each,
+// well under Convex's 5 MiB Node-action argument limit.
+//
+// No static-template fallback: if Gemini fails, the card surfaces the
+// error note and Copy stays disabled until a real prompt is produced.
 
-const MAX_INLINE_TOTAL = 14 * 1024 * 1024 // ~14 MB inline budget per request
+// Convex Node actions cap arguments at 5 MiB total. Stay safely below that
+// after base64 inflates the payload by ~33 %.
+const MAX_INLINE_TOTAL = 4.5 * 1024 * 1024
+
+const RESIZE_MAX_WIDTH = 1280
+const RESIZE_QUALITY = 0.82
 
 export default function PosterPromptCard({ form, toast }) {
   const generate = useAction('ai:generatePosterPrompt')
   const [open, setOpen] = React.useState(false)
   const [busy, setBusy] = React.useState(false)
+  const [busyLabel, setBusyLabel] = React.useState('Analysing photos…')
   const [result, setResult] = React.useState(null) // { prompt, source, note }
 
   const condo = form.condo?.trim() || ''
   const images = Array.isArray(form.images) ? form.images : []
-  const totalBytes = images.reduce((s, i) => s + (i.size || 0), 0)
   const ready = !!condo && images.length > 0
 
   // Reset the prompt when the inputs change — the displayed prompt would
@@ -33,24 +41,39 @@ export default function PosterPromptCard({ form, toast }) {
     if (!ready || busy) return
     setBusy(true)
     try {
-      const overBudget = totalBytes > MAX_INLINE_TOTAL
-      if (overBudget) {
-        toast?.(`Images total ${(totalBytes / 1024 / 1024).toFixed(1)} MB — shrink to under ~14 MB and try again.`)
-        return
+      setBusyLabel('Resizing photos…')
+      const encoded = []
+      let total = 0
+      for (let i = 0; i < images.length; i++) {
+        const img = images[i]
+        if (!img.file) throw new Error(`No file blob available for ${img.name}`)
+        const resized = await resizeImageToJpeg(img.file, RESIZE_MAX_WIDTH, RESIZE_QUALITY)
+        const dataB64 = await blobToBase64(resized)
+        const inlineBytes = Math.ceil((dataB64.length * 3) / 4)
+        total += inlineBytes
+        if (total > MAX_INLINE_TOTAL) {
+          toast?.(
+            `Resized photos still exceed ~4.5 MB at image ${i + 1} of ${images.length}. Reduce the photo count or shoot at a lower resolution.`,
+          )
+          return
+        }
+        encoded.push({
+          name: img.name,
+          mimeType: 'image/jpeg',
+          dataB64,
+        })
       }
-      const encoded = await Promise.all(
-        images.map((img) => fileToInline(img.file, img.name, img.contentType)),
-      )
+      setBusyLabel('Asking Gemini Vision…')
       const r = await generate({
         property: { condo, images: encoded },
       })
       setResult(r)
-      // Only auto-open the preview when there's an actual prompt to look at.
       setOpen(!!r?.prompt)
     } catch (err) {
       toast?.(`Could not reach the prompt generator: ${err.message || err}`)
     } finally {
       setBusy(false)
+      setBusyLabel('Analysing photos…')
     }
   }
 
@@ -69,9 +92,9 @@ export default function PosterPromptCard({ form, toast }) {
         <div>
           <h3 className="card-title">Generate poster prompt</h3>
           <p className="card-sub">
-            Gemini Vision looks at your photos and writes a brief for the{' '}
-            <strong style={{ color: 'var(--navy)' }}>/room-showcase-pdf</strong> skill — informed by what's actually
-            in the images and demanding a labeled Facts block the portal can lift back.
+            Gemini Vision looks at your photos and writes a short kickoff message for the{' '}
+            <strong style={{ color: 'var(--navy)' }}>/room-showcase-pdf</strong> skill — the message names what the
+            skill will ask you for and summarises what it sees in the photos.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
@@ -87,7 +110,7 @@ export default function PosterPromptCard({ form, toast }) {
             disabled={!ready || busy}
           >
             {busy ? (
-              'Analysing photos…'
+              busyLabel
             ) : (
               <>
                 <Icon name="sparkle" size={12} /> {result?.prompt ? 'Re-generate' : 'Generate'}
@@ -99,7 +122,7 @@ export default function PosterPromptCard({ form, toast }) {
             className="btn btn-primary btn-sm"
             onClick={copy}
             disabled={!result?.prompt || busy}
-            title={result?.prompt ? 'Copy the brief to clipboard' : 'Generate first, then copy'}
+            title={result?.prompt ? 'Copy the message to clipboard' : 'Generate first, then copy'}
           >
             <Icon name="copy" size={12} /> Copy prompt
           </button>
@@ -110,7 +133,7 @@ export default function PosterPromptCard({ form, toast }) {
         <div className="card-pad" style={{ paddingTop: 14 }}>
           <div className="empty" style={{ padding: 18, textAlign: 'left' }}>
             <h4 style={{ marginBottom: 2 }}>Name the property and attach at least one photo</h4>
-            <p style={{ margin: 0 }}>That's all Gemini Vision needs to write the brief.</p>
+            <p style={{ margin: 0 }}>That's all Gemini Vision needs to write the message.</p>
           </div>
         </div>
       )}
@@ -119,8 +142,7 @@ export default function PosterPromptCard({ form, toast }) {
         <div className="card-pad" style={{ paddingTop: 14 }}>
           <div className="prompt-summary">
             <PromptChip label="Property" value={condo} />
-            <PromptChip label="Images" value={String(images.length)} />
-            <PromptChip label="Total" value={`${(totalBytes / 1024 / 1024).toFixed(1)} MB`} />
+            <PromptChip label="Images" value={`${images.length} (resized for Vision)`} />
           </div>
 
           {result?.prompt && (
@@ -181,27 +203,60 @@ function PromptChip({ label, value }) {
   )
 }
 
-// Convert a File to { name, mimeType, dataB64 } — the inline shape Gemini
-// Vision (via the Convex action) expects.
-function fileToInline(file, name, contentType) {
+// Resize an image File to a JPEG Blob with a max width and quality cap.
+// Original aspect ratio preserved. EXIF orientation NOT handled (Gemini
+// Vision tolerates rotated photos for observation extraction).
+function resizeImageToJpeg(file, maxWidth, quality) {
   return new Promise((resolve, reject) => {
-    if (!file) {
-      reject(new Error(`No file blob available for ${name}`))
-      return
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxWidth / img.naturalWidth)
+        const w = Math.max(1, Math.round(img.naturalWidth * scale))
+        const h = Math.max(1, Math.round(img.naturalHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) {
+          URL.revokeObjectURL(url)
+          reject(new Error('canvas 2d context unavailable'))
+          return
+        }
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(
+          (blob) => {
+            URL.revokeObjectURL(url)
+            if (!blob) reject(new Error('canvas.toBlob returned null'))
+            else resolve(blob)
+          },
+          'image/jpeg',
+          quality,
+        )
+      } catch (err) {
+        URL.revokeObjectURL(url)
+        reject(err)
+      }
     }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('image decode failed'))
+    }
+    img.src = url
+  })
+}
+
+// Read a Blob into a base64 string (no `data:...;base64,` prefix).
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onload = () => {
       const result = String(reader.result || '')
-      // FileReader.readAsDataURL → "data:image/jpeg;base64,<b64>"
       const idx = result.indexOf(',')
-      const dataB64 = idx === -1 ? result : result.slice(idx + 1)
-      resolve({
-        name,
-        mimeType: contentType || file.type || 'image/jpeg',
-        dataB64,
-      })
+      resolve(idx === -1 ? result : result.slice(idx + 1))
     }
     reader.onerror = () => reject(reader.error || new Error('FileReader failed'))
-    reader.readAsDataURL(file)
+    reader.readAsDataURL(blob)
   })
 }
