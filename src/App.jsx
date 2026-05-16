@@ -5,6 +5,7 @@ import StatusScreen from './components/Status.jsx'
 import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
 import { Toast, Icon } from './components/ui.jsx'
+import logoUrl from './assets/logo.png'
 
 // The portal shell — navy left sidebar on desktop, off-canvas drawer on
 // mobile (triggered by the hamburger button in the mobile top bar). The
@@ -76,25 +77,15 @@ export default function App() {
           <Icon name="menu" size={20} />
         </button>
         <div className="mobile-top-brand">
-          <span className="brand-mark" style={{ width: 28, height: 28, fontSize: 16 }}>
-            h
-          </span>
-          <span style={{ fontWeight: 600, fontSize: 16 }}>
-            hommies<span style={{ color: 'var(--orange)' }}>.sg</span>
-          </span>
+          <img src={logoUrl} alt="hommies.sg" className="brand-logo brand-logo--sm" />
         </div>
         <div className="mobile-top-screen">· {activeLabel}</div>
       </div>
 
       <aside className={`sidebar ${navOpen ? 'sidebar--open' : ''}`}>
         <div className="brand">
-          <div className="brand-mark">h</div>
-          <div>
-            <div className="brand-name">
-              hommies<span>.sg</span>
-            </div>
-            <div className="brand-sub">Internal portal</div>
-          </div>
+          <img src={logoUrl} alt="hommies.sg" className="brand-logo" />
+          <div className="brand-sub">Internal operations portal</div>
         </div>
 
         <div>

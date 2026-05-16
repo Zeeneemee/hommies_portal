@@ -1234,3 +1234,37 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   .mobile-top-screen { display: none; }
   .image-grid { grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
 }
+
+/* ============ LOGO BLOCK (uses the cropped hommies_logo.png) ============
+   The PNG is navy artwork on a white background. We frame it inside a
+   light-tinted card so it reads cleanly against the navy sidebar.
+*/
+.brand {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  padding: 0;
+}
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 92px;
+  object-fit: contain;
+  object-position: center;
+  background: var(--cream);
+  border-radius: var(--radius-m);
+  padding: 12px 14px;
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04);
+}
+.brand-logo--sm {
+  width: auto;
+  max-width: 132px;
+  max-height: 36px;
+  padding: 4px 8px;
+  border-radius: 7px;
+}
+/* The cream-tile logo is high-enough contrast that the old inline mark/name
+   classes are no longer used — but kept in styles.css harmlessly in case
+   anything else picks them up later. */

@@ -1,23 +1,37 @@
 // AI poster-prompt generator — runs Gemini server-side in a Convex action so
-// the API key never reaches the browser. Falls back to a deterministic static
-// template if Gemini is unavailable.
+// the API key never reaches the browser.
 //
-// When the client supplies the actual image bytes (inline base64), the action
-// sends them to Gemini's multimodal Vision model so the brief is informed by
-// what's *in* the photos (room type, layout cues, condition, view, building
-// era, notable features). When images aren't supplied — or Gemini is
-// unavailable — the static template is returned and labelled accordingly.
+// Gemini Vision looks at the uploaded photos and writes the short kickoff
+// message the admin pastes into a Claude chat to invoke their
+// /room-showcase-pdf skill. The skill is opinionated and complete: it
+// scrapes PropertyGuru / 99.co, downloads the listing photos, researches
+// the project page, computes NUS / NTU / SMU routes, and runs its own
+// generator script. Our message therefore deliberately does NOT repeat
+// brand colors, layout rules, or the "four facts" — the skill has them.
+//
+// The message:
+//   1. invokes /room-showcase-pdf
+//   2. names the property
+//   3. lists, in plain text, the things the admin needs to be ready to
+//      supply when the skill asks (listing URL, target uni, client name,
+//      optional video) — these are the inputs the portal does not capture
+//   4. summarises what Gemini Vision sees in the attached photos
+//   5. asks the skill to append a small labeled "Property Facts" block to
+//      the PDF so this portal can lift the values back via text extraction
+//
+// No static-template fallback: if Gemini fails (missing key, rate limit,
+// malformed response) the action returns an error envelope.
 'use node'
 
 import { action } from './_generated/server'
 import { v } from 'convex/values'
 import { GoogleGenAI } from '@google/genai'
-import { buildPosterPrompt, type PropertyForPrompt } from './posterPrompt'
 
 const GEMINI_MODEL = 'gemini-2.0-flash'
 
 // An image carried inline so Gemini Vision can look at it. `dataB64` is the
-// raw base64 (no `data:...;base64,` prefix).
+// raw base64 (no `data:...;base64,` prefix). `name` is metadata only — it
+// MUST NOT appear in the generated message.
 const imageInline = v.object({
   name: v.string(),
   mimeType: v.string(),
@@ -29,20 +43,24 @@ const propertyArg = v.object({
   images: v.optional(v.array(imageInline)),
 })
 
-const SYSTEM_INSTRUCTION = `You write briefs for the user's Claude skill /room-showcase-pdf, which produces a single-page A4 PDF poster for a rental property in Singapore.
+const SYSTEM_INSTRUCTION = `You write a short, focused kickoff message that invokes the user's Claude skill /room-showcase-pdf.
 
-Your only job is to output the brief — no preamble, no markdown fences, no explanation. The brief MUST:
+That skill is opinionated and complete — it scrapes the listing URL on PropertyGuru / 99.co, downloads the listing photos, researches the condo project page for facilities and transit, computes the routes to NUS / NTU / SMU, and runs its own generator that already handles the Hommies.sg brand colors, fonts, layout, and the "four facts" presentation. You do NOT need to teach the skill any of that.
 
-1. Start its first line with exactly: /room-showcase-pdf
-2. State the Hommies.sg brand non-negotiables: primary orange #fd6925, primary navy #041f60, warm cream #fff5ec background. Tone is warm and family-first — "housemates becoming homies" — never corporate.
-3. Require the disclaimer footer on every poster: "We connect students with authorized agents — we are not agents."
-4. Name the property and reference the attached images.
+Your output is the exact text the user will paste into their Claude chat. Output ONLY the message — no preamble, no commentary, no markdown fences.
 
-5. LOOK AT THE PHOTOS (if any are attached). Describe — concisely, in a short "What the photos show" section inside the brief — what you actually observe: visible room type (Common Room / Master Room / Studio / Whole Unit), layout cues, condition/age impression, view/light, any notable features (gym, pool, MRT visible nearby, kitchen condition, balcony, etc.). Do not invent details you cannot see; if a value can only be guessed, say "estimated".
+The message MUST follow this structure:
 
-6. From those observations, DERIVE the physical facts the poster needs — building type (Condo or HDB), housing type (Room or Whole Unit), room type, approximate age in years, area / neighbourhood guess, a sensible monthly rent for that combination in Singapore. Label each derived value as observed-from-photos or as estimated.
-
-7. Require an upright "Facts" sidebar on the poster, rendered as REAL TEXT (not an image raster), with one value per line using these exact labels — the portal lifts these back from the PDF text and the values must be the ones you derived above:
+1. First line — exactly: /room-showcase-pdf
+2. One short line naming the property.
+3. A short block titled "Inputs you'll ask me for" listing — as plain bullet points — the four inputs the skill needs that this portal does not capture, so the user (the admin in the chat) is prepared when the skill prompts:
+     • PropertyGuru or 99.co listing URL
+     • Target university — NUS, NTU, or SMU (the campus highlighted in orange on the poster)
+     • Client name (optional — leave blank for a generic poster)
+     • Video link — Google Drive URL for a room tour (optional)
+4. A short block titled "What's attached to this chat" — one line per photo category you can see (room / unit photos, facilities photos, floorplan, site plan, etc.) — DO NOT list filenames. Refer to the photos collectively. The same photos the user will drop into their Claude chat.
+5. A short block titled "What the photos show" with your concise observations from looking at the attached photos: visible room type (Common Room / Master Room / Studio / Whole Unit), layout cues, condition / era impression, view / light, notable features (gym, pool, MRT nearby, kitchen condition, balcony). Frame each as observed-from-photos. When a value isn't visible, say "estimated" or "leave to the listing scrape" — never invent specifics.
+6. A final short block titled "Also, please append a Property Facts block" — ask the skill to add a tiny LABELED TEXT BLOCK to the poster (actual text, not raster) with these exact lines so this portal can extract them back from the PDF:
      Monthly rent: S$<number>
      Area: <area>
      Building type: Condo | HDB
@@ -50,35 +68,33 @@ Your only job is to output the brief — no preamble, no markdown fences, no exp
      Age: <number> years
      Room type: <Common Room | Master Room | Studio | Whole Unit>
      Commute: NUS <min> · NTU <min> · SMU <min>
-   Skipping this block means the portal cannot populate the property record.
 
-8. Specify A4 portrait, single page. The four facts that MUST be unmissable at a glance are: 1. Room type   2. Location & area   3. Condo or HDB   4. Age of the building. Rent large and orange; commute row beneath; photos in a grid; Hommies wordmark top-left; disclaimer footer.
-
-9. End by asking for the finished PDF back so it can be uploaded to the internal portal.
-
-Be specific to the photos and the property name. Do not invent precise specifics you cannot see — say "estimated" instead.`
+Keep the whole message short and scannable — under ~250 words. Use plain hyphens or bullets, not heavy markdown. Be honest about what you can and can't see; do not invent precise rent or address values.`
 
 export const generatePosterPrompt = action({
   args: { property: propertyArg },
   handler: async (_ctx, { property }) => {
-    const promptInputs: PropertyForPrompt = {
-      condo: property.condo,
-      images: (property.images || []).map((i) => ({ name: i.name })),
-    }
-    const fallback = buildPosterPrompt(promptInputs)
-    const hasImages = (property.images || []).length > 0
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) {
       return {
-        prompt: fallback,
-        source: 'template' as const,
-        note: 'GEMINI_API_KEY not set on the Convex deployment — using the static template.',
+        prompt: null,
+        source: 'error' as const,
+        note: 'GEMINI_API_KEY is not set on the Convex deployment. Set it with `npx convex env set GEMINI_API_KEY <key>` and try again.',
       }
     }
+
+    const photoCount = (property.images || []).length
+    if (photoCount === 0) {
+      return {
+        prompt: null,
+        source: 'error' as const,
+        note: 'No photos attached — Vision needs at least one image to write the message.',
+      }
+    }
+
     try {
       const ai = new GoogleGenAI({ apiKey })
-      const userText = describeProperty(promptInputs, hasImages)
-      const parts: any[] = [{ text: userText }]
+      const parts: any[] = [{ text: describeProperty(property.condo, photoCount) }]
       for (const img of property.images || []) {
         parts.push({ inlineData: { mimeType: img.mimeType, data: img.dataB64 } })
       }
@@ -88,46 +104,38 @@ export const generatePosterPrompt = action({
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
           temperature: 0.4,
-          maxOutputTokens: 1500,
+          maxOutputTokens: 800,
         },
       })
       const text = (response.text ?? '').trim()
       if (!text || !text.startsWith('/room-showcase-pdf')) {
         return {
-          prompt: fallback,
-          source: 'template' as const,
-          note: 'Gemini returned an empty or malformed brief — using the static template.',
+          prompt: null,
+          source: 'error' as const,
+          note: 'Gemini returned an empty or malformed message — retry, or check the model output.',
         }
       }
       return {
         prompt: text,
         source: 'gemini' as const,
-        note: hasImages
-          ? `Generated with ${GEMINI_MODEL} · vision (${(property.images || []).length} image${(property.images || []).length === 1 ? '' : 's'} analysed).`
-          : `Generated with ${GEMINI_MODEL} · text only.`,
+        note: `Generated with ${GEMINI_MODEL} · vision (${photoCount} photo${photoCount === 1 ? '' : 's'} analysed).`,
       }
     } catch (err: any) {
       return {
-        prompt: fallback,
-        source: 'template' as const,
-        note: `Gemini call failed (${err?.message || 'unknown error'}) — using the static template.`,
+        prompt: null,
+        source: 'error' as const,
+        note: `Gemini call failed: ${err?.message || 'unknown error'}`,
       }
     }
   },
 })
 
-function describeProperty(p: PropertyForPrompt, hasImages: boolean): string {
-  const lines: string[] = []
-  lines.push('Write the /room-showcase-pdf brief for this property:')
-  lines.push('')
-  lines.push(`Name: ${p.condo}`)
-  const images = p.images || []
-  if (hasImages) {
-    lines.push('')
-    lines.push(`Attached: ${images.length} photo${images.length === 1 ? '' : 's'} (look at them and weave your observations into the brief).`)
-    images.forEach((img) => lines.push(`  • ${img.name}`))
-  } else {
-    lines.push('No photos attached yet — write a brief that asks Claude to use textured placeholders and label what each frame should show.')
-  }
-  return lines.join('\n')
+function describeProperty(condo: string, photoCount: number): string {
+  return [
+    'Write the /room-showcase-pdf kickoff message for this property:',
+    '',
+    `Property name: ${condo}`,
+    '',
+    `Attached: ${photoCount} photo${photoCount === 1 ? '' : 's'} — look at them and weave what you observe into the "What the photos show" block. The user will attach these same photos to their own Claude chat from their device, so reference them only collectively (never by filename).`,
+  ].join('\n')
 }

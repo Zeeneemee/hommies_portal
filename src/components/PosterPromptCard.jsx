@@ -5,7 +5,8 @@ import { Icon } from './ui.jsx'
 // Generate poster prompt card — base64-encodes the uploaded images in the
 // browser and ships them to the Gemini Convex action, which uses Vision to
 // look at the photos and write a brief informed by what it actually sees.
-// Falls back to the deterministic static template if Gemini is unavailable.
+// No static-template fallback: if Gemini fails, the card surfaces the error
+// note and Copy stays disabled until a real prompt is produced.
 
 const MAX_INLINE_TOTAL = 14 * 1024 * 1024 // ~14 MB inline budget per request
 
@@ -32,21 +33,20 @@ export default function PosterPromptCard({ form, toast }) {
     if (!ready || busy) return
     setBusy(true)
     try {
-      // Encode each image to inline base64 — Gemini Vision reads the bytes
-      // directly. We refuse to ship more than ~14 MB inline to stay well
-      // under the platform's per-request limit.
       const overBudget = totalBytes > MAX_INLINE_TOTAL
-      const encoded = overBudget
-        ? []
-        : await Promise.all(images.map((img) => fileToInline(img.file, img.name, img.contentType)))
       if (overBudget) {
-        toast?.('Images total over ~14 MB — generating without Vision; smaller images get the full Vision pass.')
+        toast?.(`Images total ${(totalBytes / 1024 / 1024).toFixed(1)} MB — shrink to under ~14 MB and try again.`)
+        return
       }
+      const encoded = await Promise.all(
+        images.map((img) => fileToInline(img.file, img.name, img.contentType)),
+      )
       const r = await generate({
         property: { condo, images: encoded },
       })
       setResult(r)
-      setOpen(true)
+      // Only auto-open the preview when there's an actual prompt to look at.
+      setOpen(!!r?.prompt)
     } catch (err) {
       toast?.(`Could not reach the prompt generator: ${err.message || err}`)
     } finally {
@@ -75,14 +75,14 @@ export default function PosterPromptCard({ form, toast }) {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-          {result && (
+          {result?.prompt && (
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setOpen((o) => !o)}>
               {open ? 'Hide' : 'Preview'}
             </button>
           )}
           <button
             type="button"
-            className={result ? 'btn btn-ghost btn-sm' : 'btn btn-primary btn-sm'}
+            className={result?.prompt ? 'btn btn-ghost btn-sm' : 'btn btn-primary btn-sm'}
             onClick={handleGenerate}
             disabled={!ready || busy}
           >
@@ -90,7 +90,7 @@ export default function PosterPromptCard({ form, toast }) {
               'Analysing photos…'
             ) : (
               <>
-                <Icon name="sparkle" size={12} /> {result ? 'Re-generate' : 'Generate'}
+                <Icon name="sparkle" size={12} /> {result?.prompt ? 'Re-generate' : 'Generate'}
               </>
             )}
           </button>
@@ -98,8 +98,8 @@ export default function PosterPromptCard({ form, toast }) {
             type="button"
             className="btn btn-primary btn-sm"
             onClick={copy}
-            disabled={!result || busy}
-            title={result ? 'Copy the brief to clipboard' : 'Generate first, then copy'}
+            disabled={!result?.prompt || busy}
+            title={result?.prompt ? 'Copy the brief to clipboard' : 'Generate first, then copy'}
           >
             <Icon name="copy" size={12} /> Copy prompt
           </button>
@@ -123,11 +123,11 @@ export default function PosterPromptCard({ form, toast }) {
             <PromptChip label="Total" value={`${(totalBytes / 1024 / 1024).toFixed(1)} MB`} />
           </div>
 
-          {result && (
+          {result?.prompt && (
             <div
               style={{
                 fontSize: 11,
-                color: result.source === 'gemini' ? 'var(--green)' : 'var(--ink-mute)',
+                color: 'var(--green)',
                 fontWeight: 600,
                 margin: '12px 0 6px',
                 display: 'flex',
@@ -136,15 +136,22 @@ export default function PosterPromptCard({ form, toast }) {
                 flexWrap: 'wrap',
               }}
             >
-              <Icon name={result.source === 'gemini' ? 'sparkle' : 'pdf'} size={11} />
-              {result.source === 'gemini' ? 'Written by Gemini Vision' : 'Static template (fallback)'}
+              <Icon name="sparkle" size={11} />
+              Written by Gemini Vision
               {result.note && (
                 <span style={{ color: 'var(--ink-mute)', fontWeight: 400, marginLeft: 4 }}>· {result.note}</span>
               )}
             </div>
           )}
 
-          {result && open && <pre className="prompt-block">{result.prompt}</pre>}
+          {result && !result.prompt && (
+            <div className="notice notice--warn" style={{ marginTop: 12 }}>
+              <strong>Couldn't generate the prompt.</strong>
+              <div style={{ fontWeight: 400, marginTop: 4 }}>{result.note || 'No detail provided.'}</div>
+            </div>
+          )}
+
+          {result?.prompt && open && <pre className="prompt-block">{result.prompt}</pre>}
 
           <div className="prompt-steps">
             <div className="step">
