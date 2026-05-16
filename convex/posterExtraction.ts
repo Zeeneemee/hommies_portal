@@ -60,22 +60,66 @@ export function parsePosterText(text: string): ExtractedFields {
     if (raw) out.unitType = raw.trim()
   }
 
-  // Commute — match all three campus minutes off one line:
-  //   "Commute: NUS 12 · NTU 38 · SMU 22" (separators tolerated: ·, |, ,)
-  const commuteLine = first(
-    t,
-    /Commute[:\s]+([^\n\r]+?)(?=\n|\r|$)/i,
-  )
-  if (commuteLine) {
-    const NUS = numAfter(commuteLine, /NUS/i)
-    const NTU = numAfter(commuteLine, /NTU/i)
-    const SMU = numAfter(commuteLine, /SMU/i)
+  // Commute — two formats are tolerated:
+  //
+  //   1. The legacy "Property Facts" block (single labeled line):
+  //        Commute: NUS 12 · NTU 38 · SMU 22
+  //
+  //   2. The visible "Commute to Your Campus" table from the
+  //      /room-showcase-pdf poster, where each campus is on its own row with
+  //      an approximate value:
+  //        NUS  Lakeside MRT → … → Kent Ridge    ~45 min  View →
+  //        ★ NTU Lakeside MRT → …                ~30 min  View →
+  //        SMU  Lakeside MRT → …                 ~50 min  View →
+  //
+  // Try the fast single-line path first; if it doesn't yield all three,
+  // fall back to per-campus zone parsing across the whole text.
+  // The colon is intentional — it distinguishes the Property Facts line from
+  // the visible "Commute to Your Campus" header (no colon), which would
+  // otherwise be a first-match red herring.
+  const factsLine = first(t, /Commute\s*:\s*([^\n\r]+?)(?=\n|\r|$)/i)
+  if (factsLine) {
+    const NUS = numAfter(factsLine, /NUS/i)
+    const NTU = numAfter(factsLine, /NTU/i)
+    const SMU = numAfter(factsLine, /SMU/i)
+    if (NUS != null && NTU != null && SMU != null) {
+      out.commuteMins = { NUS, NTU, SMU }
+    }
+  }
+  if (!out.commuteMins) {
+    const NUS = findCampusMins(t, 'NUS')
+    const NTU = findCampusMins(t, 'NTU')
+    const SMU = findCampusMins(t, 'SMU')
     if (NUS != null && NTU != null && SMU != null) {
       out.commuteMins = { NUS, NTU, SMU }
     }
   }
 
   return out
+}
+
+// Per-campus zone parser: find the campus label, then look for the next
+// "~?<N> min" before the next campus label appears. The zone bound prevents
+// one campus's minutes from being attributed to another when a row is
+// missing or rearranged.
+function findCampusMins(text: string, campus: 'NUS' | 'NTU' | 'SMU'): number | null {
+  const campusRe = new RegExp(`\\b${campus}\\b`, 'i')
+  const start = campusRe.exec(text)
+  if (!start) return null
+  const zoneStart = start.index + start[0].length
+
+  const others = (['NUS', 'NTU', 'SMU'] as const).filter((c) => c !== campus)
+  let zoneEnd = text.length
+  for (const other of others) {
+    const otherRe = new RegExp(`\\b${other}\\b`, 'gi')
+    otherRe.lastIndex = zoneStart
+    const m = otherRe.exec(text)
+    if (m && m.index < zoneEnd) zoneEnd = m.index
+  }
+
+  const zone = text.slice(zoneStart, zoneEnd)
+  const minMatch = zone.match(/~?\s*(\d{1,3})\s*min\b/i)
+  return minMatch ? Number(minMatch[1]) : null
 }
 
 function first(text: string, re: RegExp): string {

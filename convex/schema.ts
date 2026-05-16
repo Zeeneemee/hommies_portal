@@ -99,4 +99,25 @@ export default defineSchema({
   })
     .index('by_createdAt', ['createdAt'])
     .index('by_sheetTimestamp', ['sheetTimestamp']),
+
+  // Operator-driven (property, client) commitments — the "must send" ledger
+  // layered on top of the live decide() engine. Pin = "I commit to sending
+  // this property to this client"; sent = "the outreach actually went out".
+  // Sent rows are immutable (audit trail); unpin sets unpinnedAt as a
+  // tombstone so a fresh pin for the same pair can coexist with the
+  // withdrawn one. See openspec/changes/descriptive-property-assignments.
+  assignments: defineTable({
+    propertyId: v.id('properties'),
+    responseId: v.id('responses'),
+    status: v.union(v.literal('pinned'), v.literal('sent')),
+    pinnedAt: v.number(),
+    pinnedScore: v.number(),
+    pinnedReason: v.optional(v.string()),
+    sentAt: v.optional(v.number()),
+    sentVia: v.optional(v.string()),
+    unpinnedAt: v.optional(v.number()),
+  })
+    .index('by_property', ['propertyId'])
+    .index('by_response', ['responseId'])
+    .index('by_status', ['status']),
 })

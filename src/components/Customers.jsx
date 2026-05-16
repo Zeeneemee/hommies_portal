@@ -1,7 +1,37 @@
 import React from 'react'
-import { useMutation } from 'convex/react'
+import { useMutation, useQuery } from 'convex/react'
 import { Icon, Pill } from './ui.jsx'
 import ManualResponseForm from './ManualResponseModal.jsx'
+
+// Summarise a client's assignment history into counts + recency. Tombstones
+// (unpinnedAt set) are excluded — they belong in audit, not in the chip.
+export function engagementFor(responseId, assignments) {
+  let pinnedCount = 0
+  let sentCount = 0
+  let latestAt = 0
+  for (const a of assignments || []) {
+    if (a.responseId !== responseId) continue
+    if (a.unpinnedAt !== undefined) continue
+    if (a.status === 'pinned') pinnedCount += 1
+    else if (a.status === 'sent') sentCount += 1
+    const at = Math.max(a.pinnedAt || 0, a.sentAt || 0)
+    if (at > latestAt) latestAt = at
+  }
+  return { pinnedCount, sentCount, latestAt }
+}
+
+function relativeTime(ms) {
+  if (!ms) return ''
+  const diff = Date.now() - ms
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const d = Math.floor(hr / 24)
+  if (d < 14) return `${d}d ago`
+  return new Date(ms).toLocaleDateString('en-SG', { month: 'short', day: 'numeric' })
+}
 
 // Screen 5 — every customer / form response laid out as a card. The
 // recipient database the Recommend engine matches against, visible on its
@@ -16,6 +46,7 @@ const SOURCE_FILTERS = ['All', 'csv', 'manual', 'form']
 export default function CustomersScreen({ toast, responses }) {
   const addResponse = useMutation('responses:add')
   const removeResponse = useMutation('responses:remove')
+  const assignments = useQuery('assignments:list', {}) ?? []
   const [showAdd, setShowAdd] = React.useState(false)
   const [school, setSchool] = React.useState('All')
   const [source, setSource] = React.useState('All')
@@ -124,7 +155,12 @@ export default function CustomersScreen({ toast, responses }) {
       ) : (
         <div className="customers-grid">
           {filtered.map((r) => (
-            <CustomerCard key={r._id} response={r} onDelete={() => handleDelete(r)} />
+            <CustomerCard
+              key={r._id}
+              response={r}
+              engagement={engagementFor(r._id, assignments)}
+              onDelete={() => handleDelete(r)}
+            />
           ))}
         </div>
       )}
@@ -141,6 +177,19 @@ export default function CustomersScreen({ toast, responses }) {
       )}
     </div>
   )
+}
+
+function EngagementChip({ engagement }) {
+  if (!engagement) return null
+  const { pinnedCount, sentCount, latestAt } = engagement
+  if (pinnedCount === 0 && sentCount === 0) {
+    return <div className="engagement-chip engagement-chip--empty">no engagement yet</div>
+  }
+  const parts = []
+  if (pinnedCount > 0) parts.push(`${pinnedCount} pinned`)
+  if (sentCount > 0) parts.push(`${sentCount} sent`)
+  if (latestAt) parts.push(`latest ${relativeTime(latestAt)}`)
+  return <div className="engagement-chip">{parts.join(' · ')}</div>
 }
 
 function Stat({ label, value, accent, muted }) {
@@ -173,7 +222,7 @@ function fmtDate(d) {
   return new Date(t).toLocaleDateString('en-SG', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-function CustomerCard({ response: r, onDelete }) {
+function CustomerCard({ response: r, engagement, onDelete }) {
   const ext = r.extras || {}
   const flags = []
   if (ext.petFriendly) flags.push('pet')
@@ -212,6 +261,8 @@ function CustomerCard({ response: r, onDelete }) {
         <span className="customer-channel-name">{r.channel || '—'}</span>
         {r.contact && <span className="customer-channel-handle">{r.contact}</span>}
       </div>
+
+      <EngagementChip engagement={engagement} />
 
       <div className="customer-facts">
         <div>

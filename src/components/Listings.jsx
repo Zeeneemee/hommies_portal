@@ -1,7 +1,25 @@
 import React from 'react'
-import { useMutation } from 'convex/react'
+import { useMutation, useQuery } from 'convex/react'
+import { useNavigate } from 'react-router-dom'
 import { Pill, StatusPill, Icon } from './ui.jsx'
 import ListingEditModal from './ListingEditModal.jsx'
+
+// A property is "orphan" when it has been around long enough to plausibly
+// have been pinned/sent yet has zero active assignments. Clock starts at
+// posterExtractedAt (the moment it became matchable) or createdAt as a
+// fallback for legacy rows. 3 days is coded, not configured — until we
+// have evidence the right number is operator-specific.
+const ORPHAN_AGE_MS = 3 * 24 * 60 * 60 * 1000
+
+export function isOrphan(property, assignments) {
+  const start = property.posterExtractedAt ?? property.createdAt
+  if (!start) return false
+  if (Date.now() - start < ORPHAN_AGE_MS) return false
+  const hasActive = (assignments || []).some(
+    (a) => a.propertyId === property._id && a.unpinnedAt === undefined,
+  )
+  return !hasActive
+}
 
 // Screen 4 — card-based inventory of every property the portal is holding.
 // Each card supports inline CRUD: edit fields via the modal (properties:update),
@@ -12,6 +30,8 @@ import ListingEditModal from './ListingEditModal.jsx'
 export default function ListingsScreen({ properties, toast }) {
   const [filter, setFilter] = React.useState('All')
   const [editingId, setEditingId] = React.useState(null)
+  const assignments = useQuery('assignments:list', {}) ?? []
+  const navigate = useNavigate()
 
   const filtered = properties.filter((p) => {
     if (filter === 'All') return true
@@ -65,7 +85,14 @@ export default function ListingsScreen({ properties, toast }) {
 
       <div className="listings-grid">
         {filtered.map((p) => (
-          <ListingCard key={p._id} property={p} onEdit={() => setEditingId(p._id)} toast={toast} />
+          <ListingCard
+            key={p._id}
+            property={p}
+            orphan={isOrphan(p, assignments)}
+            onEdit={() => setEditingId(p._id)}
+            onOpenInRecommend={() => navigate(`/recommend?property=${p._id}`)}
+            toast={toast}
+          />
         ))}
       </div>
 
@@ -96,7 +123,7 @@ function ListingEditController({ property, onClose, toast }) {
   return <ListingEditModal property={property} onClose={onClose} onSave={handleSave} />
 }
 
-function ListingCard({ property: p, onEdit, toast }) {
+function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) {
   const advanceStatus = useMutation('properties:advanceStatus')
   const removeProperty = useMutation('properties:remove')
   const [busy, setBusy] = React.useState(false)
@@ -179,6 +206,17 @@ function ListingCard({ property: p, onEdit, toast }) {
               <Pill kind="warn" dot>
                 No poster
               </Pill>
+            )}
+            {orphan && (
+              <button
+                type="button"
+                className="orphan-pill"
+                onClick={onOpenInRecommend}
+                title="3+ days old with no pinned or sent recipients. Click to open in Recommend."
+              >
+                <i className="dot" />
+                Orphan — needs recipients
+              </button>
             )}
           </div>
           <div

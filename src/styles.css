@@ -1526,3 +1526,123 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   .view-toggle { width: 100%; justify-content: center; }
   .view-toggle button { flex: 1; justify-content: center; }
 }
+
+/* ── Assignment sections (Must send / Sent / Suggestions / Held back) ── */
+.assignment-section {
+  margin-bottom: 22px;
+}
+.assignment-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--hairline);
+}
+.assignment-section-title {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--navy);
+}
+.assignment-section-count {
+  background: var(--cream);
+  border: 1px solid var(--hairline);
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 100px;
+  color: var(--ink-soft);
+  font-weight: 500;
+}
+.assignment-section-sub {
+  font-size: 12px;
+  color: var(--ink-mute);
+  margin-left: auto;
+}
+.assignment-section--must-send .assignment-section-title { color: var(--navy); }
+.assignment-section--must-send .assignment-section-count {
+  background: rgba(4,31,96,0.07);
+  border-color: rgba(4,31,96,0.12);
+  color: var(--navy);
+}
+.assignment-section--sent .assignment-section-count {
+  background: var(--green-soft);
+  border-color: var(--green-soft);
+  color: #126b4f;
+}
+.assignment-section--suggestion .assignment-section-count {
+  background: var(--orange-soft);
+  border-color: var(--orange-soft);
+  color: #b04412;
+}
+.assignment-section--hold .assignment-section-title { color: var(--ink-soft); }
+.assignment-section-empty {
+  padding: 14px 16px;
+  font-size: 13px;
+  color: var(--ink-mute);
+  background: var(--cream);
+  border: 1px dashed var(--hairline);
+  border-radius: var(--radius-m);
+}
+
+/* ── Score pair (pinnedScore · currentScore), neutral by design ── */
+.score-pair {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.score-pair-pin {
+  color: var(--ink);
+  font-weight: 600;
+}
+.score-pair-now {
+  color: var(--ink-soft);
+}
+.score-pair-sep {
+  color: var(--ink-mute);
+}
+
+/* ── Orphan pill on Listings cards ── */
+.orphan-pill {
+  border: 0;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 100px;
+  letter-spacing: 0.01em;
+}
+.orphan-pill:hover {
+  background: rgba(220, 53, 69, 0.18);
+}
+.orphan-pill .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+/* ── Engagement chip on Customers cards ── */
+.engagement-chip {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: var(--cream);
+  border: 1px solid var(--hairline);
+  padding: 4px 10px;
+  border-radius: 100px;
+  display: inline-block;
+  align-self: flex-start;
+  font-weight: 500;
+}
+.engagement-chip--empty {
+  color: var(--ink-mute);
+  font-style: italic;
+}

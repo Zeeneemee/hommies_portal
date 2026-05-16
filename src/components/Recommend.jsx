@@ -1,5 +1,6 @@
 import React from 'react'
-import { useMutation } from 'convex/react'
+import { useMutation, useQuery } from 'convex/react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   recommendRecipients,
   draftMessage,
@@ -9,16 +10,17 @@ import {
 import { Icon, Pill, StatusPill } from './ui.jsx'
 import ManualResponseModal from './ManualResponseModal.jsx'
 
-// Screen 3 — the decision engine. Two complementary views over the same
-// matching logic:
+// Screen 3 — the decision engine, layered with the operator's commitment
+// ledger. Each view shows four stacked sections:
 //
-//   • By property — pick a listing, see ranked Send / Hold customers
-//                   (the original workflow)
-//   • By client   — pick a customer, see ranked Send / Hold properties
-//                   ("what should I send this person?")
+//   • Must send   — active pins, not yet sent (operator's working queue)
+//   • Sent        — read-only audit history
+//   • Suggestions — current decide() Send-bucket output minus already-covered pairs
+//   • Held back   — current decide() Hold-bucket, with a deliberate
+//                   [Override and pin] path for the cases the operator knows
+//                   beat the score
 //
-// Same engine, mirrored direction. Drafts and reasons are identical in
-// either view — the only thing that changes is which list you iterate.
+// decide() and draftMessage() are unchanged — the new sections sit on top.
 
 function propertyIsMatchable(p) {
   return (
@@ -60,13 +62,77 @@ function recommendListingsForClient(client, properties) {
   return { send, hold }
 }
 
+// Split a property's assignments into active-pinned and sent lists.
+// Unpinned rows (tombstones) are filtered out of both — they survive in the
+// database for audit only.
+export function partitionAssignmentsForProperty(propertyId, assignments) {
+  const pinned = []
+  const sent = []
+  for (const a of assignments || []) {
+    if (a.propertyId !== propertyId) continue
+    if (a.unpinnedAt !== undefined) continue
+    if (a.status === 'pinned') pinned.push(a)
+    else if (a.status === 'sent') sent.push(a)
+  }
+  pinned.sort((a, b) => b.pinnedAt - a.pinnedAt)
+  sent.sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0))
+  return { pinned, sent }
+}
+
+// Symmetric — split a client's assignments by their other axis.
+export function partitionAssignmentsForClient(responseId, assignments) {
+  const pinned = []
+  const sent = []
+  for (const a of assignments || []) {
+    if (a.responseId !== responseId) continue
+    if (a.unpinnedAt !== undefined) continue
+    if (a.status === 'pinned') pinned.push(a)
+    else if (a.status === 'sent') sent.push(a)
+  }
+  pinned.sort((a, b) => b.pinnedAt - a.pinnedAt)
+  sent.sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0))
+  return { pinned, sent }
+}
+
+// True when (propertyId, responseId) has any non-tombstone assignment row.
+function isPairCovered(propertyId, responseId, assignments) {
+  return (assignments || []).some(
+    (a) =>
+      a.propertyId === propertyId &&
+      a.responseId === responseId &&
+      a.unpinnedAt === undefined,
+  )
+}
+
 export default function RecommendScreen({ toast, properties, responses }) {
   const addResponse = useMutation('responses:add')
   const addManyResponses = useMutation('responses:addMany')
+  const assignments = useQuery('assignments:list', {}) ?? []
+  const pin = useMutation('assignments:pin')
+  const unpin = useMutation('assignments:unpin')
+  const markSent = useMutation('assignments:markSent')
 
   const [viewMode, setViewMode] = React.useState('by-property')
   const [showManual, setShowManual] = React.useState(false)
   const csvRef = React.useRef(null)
+
+  // Listings cards link here with ?property=<id>. We honour it the first
+  // time the page loads, then clear the param so subsequent navigation
+  // doesn't keep snapping the picker back.
+  const location = useLocation()
+  const navigate = useNavigate()
+  const requestedPropertyId = React.useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get('property')
+  }, [location.search])
+  const [initialPropertyId, setInitialPropertyId] = React.useState(requestedPropertyId)
+  React.useEffect(() => {
+    if (requestedPropertyId) {
+      setViewMode('by-property')
+      setInitialPropertyId(requestedPropertyId)
+      navigate('/recommend', { replace: true })
+    }
+  }, [requestedPropertyId, navigate])
 
   async function handleCSV(file) {
     if (!file) return
@@ -86,7 +152,24 @@ export default function RecommendScreen({ toast, properties, responses }) {
     }
   }
 
-  // Quick guards for the two empty cases.
+  const actions = React.useMemo(
+    () => ({
+      pin: async ({ propertyId, responseId, pinnedScore, pinnedReason }) => {
+        await pin({ propertyId, responseId, pinnedScore, pinnedReason })
+        toast('Pinned — added to Must-send.')
+      },
+      unpin: async (assignmentId) => {
+        await unpin({ id: assignmentId })
+        toast('Unpinned.')
+      },
+      markSent: async (assignmentId, sentVia) => {
+        await markSent({ id: assignmentId, sentVia })
+        toast('Marked sent.')
+      },
+    }),
+    [pin, unpin, markSent, toast],
+  )
+
   if (properties.length === 0 && responses.length === 0) {
     return (
       <div>
@@ -124,9 +207,22 @@ export default function RecommendScreen({ toast, properties, responses }) {
       />
 
       {viewMode === 'by-property' ? (
-        <ByPropertyView properties={properties} responses={responses} toast={toast} />
+        <ByPropertyView
+          properties={properties}
+          responses={responses}
+          assignments={assignments}
+          actions={actions}
+          toast={toast}
+          initialPropertyId={initialPropertyId}
+        />
       ) : (
-        <ByClientView properties={properties} responses={responses} toast={toast} />
+        <ByClientView
+          properties={properties}
+          responses={responses}
+          assignments={assignments}
+          actions={actions}
+          toast={toast}
+        />
       )}
 
       {showManual && (
@@ -184,15 +280,24 @@ function Header({ viewMode, onViewMode, hideToggle, actions }) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VIEW 1 — By property (pick a listing, see Send / Hold customers)
+// VIEW 1 — By property
 // ─────────────────────────────────────────────────────────────────────────────
-function ByPropertyView({ properties, responses, toast }) {
+function ByPropertyView({ properties, responses, assignments, actions, toast, initialPropertyId }) {
   const matchable = React.useMemo(() => properties.filter(propertyIsMatchable), [properties])
   const hiddenCount = properties.length - matchable.length
 
-  const [selectedId, setSelectedId] = React.useState(matchable[0]?._id || null)
-  const [bucket, setBucket] = React.useState('send')
+  const [selectedId, setSelectedId] = React.useState(
+    initialPropertyId && matchable.find((p) => p._id === initialPropertyId)
+      ? initialPropertyId
+      : matchable[0]?._id || null,
+  )
   const [expanded, setExpanded] = React.useState({})
+
+  React.useEffect(() => {
+    if (initialPropertyId && matchable.find((p) => p._id === initialPropertyId)) {
+      setSelectedId(initialPropertyId)
+    }
+  }, [initialPropertyId, matchable])
 
   React.useEffect(() => {
     if (selectedId && !matchable.find((p) => p._id === selectedId)) {
@@ -203,10 +308,32 @@ function ByPropertyView({ properties, responses, toast }) {
   }, [matchable, selectedId])
 
   const prop = matchable.find((p) => p._id === selectedId) || null
-  const result = React.useMemo(
-    () => (prop ? recommendRecipients(prop, responses) : { send: [], hold: [] }),
-    [prop, responses],
-  )
+
+  const buckets = React.useMemo(() => {
+    if (!prop) return { pinned: [], sent: [], suggestions: [], hold: [] }
+    const { pinned, sent } = partitionAssignmentsForProperty(prop._id, assignments)
+    const { send, hold } = recommendRecipients(prop, responses)
+    const responseById = new Map(responses.map((r) => [r._id, r]))
+    const decideFor = (responseId) => {
+      const r = responseById.get(responseId)
+      return r ? { response: r, decision: decide(r, prop) } : null
+    }
+    const pinnedEntries = pinned
+      .map((a) => {
+        const live = decideFor(a.responseId)
+        return live ? { assignment: a, response: live.response, decision: live.decision } : null
+      })
+      .filter(Boolean)
+    const sentEntries = sent
+      .map((a) => {
+        const live = decideFor(a.responseId)
+        return live ? { assignment: a, response: live.response, decision: live.decision } : null
+      })
+      .filter(Boolean)
+    const suggestions = send.filter((d) => !isPairCovered(prop._id, d.response._id, assignments))
+    const holdFiltered = hold.filter((d) => !isPairCovered(prop._id, d.response._id, assignments))
+    return { pinned: pinnedEntries, sent: sentEntries, suggestions, hold: holdFiltered }
+  }, [prop, responses, assignments])
 
   if (matchable.length === 0) {
     return (
@@ -232,22 +359,27 @@ function ByPropertyView({ properties, responses, toast }) {
         </div>
         <div className="card-pad" style={{ paddingTop: 14 }}>
           <div className="property-picker-list">
-            {matchable.map((p) => (
-              <button
-                key={p._id}
-                type="button"
-                className={`property-pick ${selectedId === p._id ? 'on' : ''}`}
-                onClick={() => setSelectedId(p._id)}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                  <span className="pp-name">{p.condo}</span>
-                  <StatusPill status={p.status} />
-                </div>
-                <span className="pp-meta">
-                  {p.unitType} · {p.area} · S${p.rentSGD}/mo
-                </span>
-              </button>
-            ))}
+            {matchable.map((p) => {
+              const { pinned, sent } = partitionAssignmentsForProperty(p._id, assignments)
+              return (
+                <button
+                  key={p._id}
+                  type="button"
+                  className={`property-pick ${selectedId === p._id ? 'on' : ''}`}
+                  onClick={() => setSelectedId(p._id)}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                    <span className="pp-name">{p.condo}</span>
+                    <StatusPill status={p.status} />
+                  </div>
+                  <span className="pp-meta">
+                    {p.unitType} · {p.area} · S${p.rentSGD}/mo
+                    {pinned.length > 0 && ` · ${pinned.length} pinned`}
+                    {sent.length > 0 && ` · ${sent.length} sent`}
+                  </span>
+                </button>
+              )
+            })}
           </div>
           {hiddenCount > 0 && (
             <div className="recommend-hidden-note">
@@ -276,74 +408,112 @@ function ByPropertyView({ properties, responses, toast }) {
           </div>
         )}
 
-        <BucketTabs
-          bucket={bucket}
-          onBucket={setBucket}
-          sendCount={result.send.length}
-          holdCount={result.hold.length}
-        />
+        <AssignmentSection title="Must send" subtitle="Pinned — outreach not yet sent." count={buckets.pinned.length} kind="must-send">
+          {buckets.pinned.length === 0 ? (
+            <SectionEmpty>No pins yet. Use [Pin] on a Suggestion to commit.</SectionEmpty>
+          ) : (
+            buckets.pinned.map((d, idx) => (
+              <ClientMatchCard
+                key={d.assignment._id}
+                variant="must-send"
+                response={d.response}
+                decision={d.decision}
+                property={prop}
+                assignment={d.assignment}
+                isOpen={!!expanded[d.assignment._id]}
+                onToggle={() =>
+                  setExpanded((e) => ({ ...e, [d.assignment._id]: !e[d.assignment._id] }))
+                }
+                actions={actions}
+                toast={toast}
+                rank={idx + 1}
+              />
+            ))
+          )}
+        </AssignmentSection>
 
-        {bucket === 'send' && result.send.length === 0 && (
-          <div className="empty">
-            <h4>Nothing to send for this property</h4>
-            <p>The held-back tab will tell you why.</p>
-          </div>
-        )}
-        {bucket === 'hold' && result.hold.length === 0 && (
-          <div className="empty">
-            <h4>No one held back</h4>
-            <p>Every customer is a fit.</p>
-          </div>
-        )}
+        <AssignmentSection title="Sent" subtitle="Outreach the operator has confirmed went out." count={buckets.sent.length} kind="sent">
+          {buckets.sent.length === 0 ? (
+            <SectionEmpty>Nothing sent for this property yet.</SectionEmpty>
+          ) : (
+            buckets.sent.map((d) => (
+              <ClientMatchCard
+                key={d.assignment._id}
+                variant="sent"
+                response={d.response}
+                decision={d.decision}
+                property={prop}
+                assignment={d.assignment}
+                isOpen={!!expanded[d.assignment._id]}
+                onToggle={() =>
+                  setExpanded((e) => ({ ...e, [d.assignment._id]: !e[d.assignment._id] }))
+                }
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
 
-        {bucket === 'send' &&
-          result.send.map((d, idx) => (
-            <ClientMatchCard
-              key={d.response._id ?? d.response.name + idx}
-              rank={idx + 1}
-              verdict="send"
-              response={d.response}
-              decision={d.decision}
-              property={prop}
-              isOpen={!!expanded[d.response._id ?? idx]}
-              onToggle={() =>
-                setExpanded((e) => ({
-                  ...e,
-                  [d.response._id ?? idx]: !e[d.response._id ?? idx],
-                }))
-              }
-              toast={toast}
-            />
-          ))}
+        <AssignmentSection title="Suggestions" subtitle="Live decide() Send bucket, excluding pairs already covered." count={buckets.suggestions.length} kind="suggestion">
+          {buckets.suggestions.length === 0 ? (
+            <SectionEmpty>No fresh suggestions — every fit is already pinned or sent.</SectionEmpty>
+          ) : (
+            buckets.suggestions.map((d, idx) => (
+              <ClientMatchCard
+                key={d.response._id ?? d.response.name + idx}
+                variant="suggestion"
+                rank={idx + 1}
+                response={d.response}
+                decision={d.decision}
+                property={prop}
+                isOpen={!!expanded[d.response._id ?? idx]}
+                onToggle={() =>
+                  setExpanded((e) => ({
+                    ...e,
+                    [d.response._id ?? idx]: !e[d.response._id ?? idx],
+                  }))
+                }
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
 
-        {bucket === 'hold' &&
-          result.hold.map((d, idx) => (
-            <ClientMatchCard
-              key={d.response._id ?? d.response.name + idx}
-              verdict="hold"
-              response={d.response}
-              decision={d.decision}
-              property={prop}
-              isOpen={false}
-              onToggle={() => {}}
-              toast={toast}
-            />
-          ))}
+        <AssignmentSection title="Held back" subtitle="Engine says don't send. Override only when you know something the engine doesn't." count={buckets.hold.length} kind="hold">
+          {buckets.hold.length === 0 ? (
+            <SectionEmpty>No one held back — every customer is a fit.</SectionEmpty>
+          ) : (
+            buckets.hold.map((d, idx) => (
+              <ClientMatchCard
+                key={d.response._id ?? d.response.name + idx}
+                variant="hold"
+                response={d.response}
+                decision={d.decision}
+                property={prop}
+                isOpen={false}
+                onToggle={() => {}}
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
       </div>
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VIEW 2 — By client (pick a customer, see Send / Hold properties)
+// VIEW 2 — By client
 // ─────────────────────────────────────────────────────────────────────────────
 const SCHOOL_FILTERS = ['All', 'NUS', 'NTU', 'SMU', 'OTHER']
 
-function ByClientView({ properties, responses, toast }) {
+function ByClientView({ properties, responses, assignments, actions, toast }) {
   const [school, setSchool] = React.useState('All')
   const [search, setSearch] = React.useState('')
   const [selectedId, setSelectedId] = React.useState(responses[0]?._id || null)
-  const [bucket, setBucket] = React.useState('send')
   const [expanded, setExpanded] = React.useState({})
 
   const filtered = React.useMemo(() => {
@@ -364,10 +534,37 @@ function ByClientView({ properties, responses, toast }) {
   }, [filtered, selectedId])
 
   const client = filtered.find((r) => r._id === selectedId) || null
-  const result = React.useMemo(
-    () => (client ? recommendListingsForClient(client, properties) : { send: [], hold: [] }),
-    [client, properties],
-  )
+
+  const buckets = React.useMemo(() => {
+    if (!client) return { pinned: [], sent: [], suggestions: [], hold: [] }
+    const { pinned, sent } = partitionAssignmentsForClient(client._id, assignments)
+    const { send, hold } = recommendListingsForClient(client, properties)
+    const propertyById = new Map(properties.map((p) => [p._id, p]))
+    const decideForProperty = (propertyId) => {
+      const p = propertyById.get(propertyId)
+      if (!p || !propertyIsMatchable(p)) return null
+      return { property: p, decision: decide(client, p) }
+    }
+    const pinnedEntries = pinned
+      .map((a) => {
+        const live = decideForProperty(a.propertyId)
+        return live ? { assignment: a, property: live.property, decision: live.decision } : null
+      })
+      .filter(Boolean)
+    const sentEntries = sent
+      .map((a) => {
+        const live = decideForProperty(a.propertyId)
+        return live ? { assignment: a, property: live.property, decision: live.decision } : null
+      })
+      .filter(Boolean)
+    const suggestions = send.filter(
+      (d) => !isPairCovered(d.property._id, client._id, assignments),
+    )
+    const holdFiltered = hold.filter(
+      (d) => !isPairCovered(d.property._id, client._id, assignments),
+    )
+    return { pinned: pinnedEntries, sent: sentEntries, suggestions, hold: holdFiltered }
+  }, [client, properties, assignments])
 
   if (responses.length === 0) {
     return (
@@ -416,24 +613,29 @@ function ByClientView({ properties, responses, toast }) {
                 No customers match this filter.
               </div>
             ) : (
-              filtered.map((r) => (
-                <button
-                  key={r._id}
-                  type="button"
-                  className={`property-pick ${selectedId === r._id ? 'on' : ''}`}
-                  onClick={() => setSelectedId(r._id)}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
-                    <span className="pp-name">{r.name}</span>
-                    <Pill kind={r.school === 'NUS' ? 'orange' : r.school === 'OTHER' ? 'grey' : 'navy'}>
-                      {r.school}
-                    </Pill>
-                  </div>
-                  <span className="pp-meta">
-                    {r.housingType} · S${r.budget?.min}–{r.budget?.max} · ≤{r.commuteTolMins}min
-                  </span>
-                </button>
-              ))
+              filtered.map((r) => {
+                const { pinned, sent } = partitionAssignmentsForClient(r._id, assignments)
+                return (
+                  <button
+                    key={r._id}
+                    type="button"
+                    className={`property-pick ${selectedId === r._id ? 'on' : ''}`}
+                    onClick={() => setSelectedId(r._id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
+                      <span className="pp-name">{r.name}</span>
+                      <Pill kind={r.school === 'NUS' ? 'orange' : r.school === 'OTHER' ? 'grey' : 'navy'}>
+                        {r.school}
+                      </Pill>
+                    </div>
+                    <span className="pp-meta">
+                      {r.housingType} · S${r.budget?.min}–{r.budget?.max} · ≤{r.commuteTolMins}min
+                      {pinned.length > 0 && ` · ${pinned.length} pinned`}
+                      {sent.length > 0 && ` · ${sent.length} sent`}
+                    </span>
+                  </button>
+                )
+              })
             )}
           </div>
         </div>
@@ -459,58 +661,89 @@ function ByClientView({ properties, responses, toast }) {
           </div>
         )}
 
-        <BucketTabs
-          bucket={bucket}
-          onBucket={setBucket}
-          sendCount={result.send.length}
-          holdCount={result.hold.length}
-          sendLabel="Send these"
-          holdLabel="Don't send"
-        />
+        <AssignmentSection title="Must send" subtitle="Properties pinned for this client — outreach not yet sent." count={buckets.pinned.length} kind="must-send">
+          {buckets.pinned.length === 0 ? (
+            <SectionEmpty>No pins yet for this client.</SectionEmpty>
+          ) : (
+            buckets.pinned.map((d, idx) => (
+              <PropertyMatchCard
+                key={d.assignment._id}
+                variant="must-send"
+                rank={idx + 1}
+                property={d.property}
+                decision={d.decision}
+                client={client}
+                assignment={d.assignment}
+                isOpen={!!expanded[d.assignment._id]}
+                onToggle={() => setExpanded((e) => ({ ...e, [d.assignment._id]: !e[d.assignment._id] }))}
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
 
-        {bucket === 'send' && result.send.length === 0 && (
-          <div className="empty">
-            <h4>No fitting properties for this customer right now</h4>
-            <p>The held-back tab shows why each listing was passed over.</p>
-          </div>
-        )}
-        {bucket === 'hold' && result.hold.length === 0 && (
-          <div className="empty">
-            <h4>Every property fits this customer</h4>
-            <p>Lucky one.</p>
-          </div>
-        )}
+        <AssignmentSection title="Sent" subtitle="Properties already sent to this client." count={buckets.sent.length} kind="sent">
+          {buckets.sent.length === 0 ? (
+            <SectionEmpty>Nothing sent to this client yet.</SectionEmpty>
+          ) : (
+            buckets.sent.map((d) => (
+              <PropertyMatchCard
+                key={d.assignment._id}
+                variant="sent"
+                property={d.property}
+                decision={d.decision}
+                client={client}
+                assignment={d.assignment}
+                isOpen={!!expanded[d.assignment._id]}
+                onToggle={() => setExpanded((e) => ({ ...e, [d.assignment._id]: !e[d.assignment._id] }))}
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
 
-        {bucket === 'send' &&
-          result.send.map((d, idx) => (
-            <PropertyMatchCard
-              key={d.property._id}
-              rank={idx + 1}
-              verdict="send"
-              property={d.property}
-              decision={d.decision}
-              client={client}
-              isOpen={!!expanded[d.property._id]}
-              onToggle={() =>
-                setExpanded((e) => ({ ...e, [d.property._id]: !e[d.property._id] }))
-              }
-              toast={toast}
-            />
-          ))}
+        <AssignmentSection title="Suggestions" subtitle="Live decide() output, excluding pairs already covered." count={buckets.suggestions.length} kind="suggestion">
+          {buckets.suggestions.length === 0 ? (
+            <SectionEmpty>No fresh suggestions for this client.</SectionEmpty>
+          ) : (
+            buckets.suggestions.map((d, idx) => (
+              <PropertyMatchCard
+                key={d.property._id}
+                variant="suggestion"
+                rank={idx + 1}
+                property={d.property}
+                decision={d.decision}
+                client={client}
+                isOpen={!!expanded[d.property._id]}
+                onToggle={() => setExpanded((e) => ({ ...e, [d.property._id]: !e[d.property._id] }))}
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
 
-        {bucket === 'hold' &&
-          result.hold.map((d) => (
-            <PropertyMatchCard
-              key={d.property._id}
-              verdict="hold"
-              property={d.property}
-              decision={d.decision}
-              client={client}
-              isOpen={false}
-              onToggle={() => {}}
-              toast={toast}
-            />
-          ))}
+        <AssignmentSection title="Held back" subtitle="Engine says don't send. Override only when you know something the engine doesn't." count={buckets.hold.length} kind="hold">
+          {buckets.hold.length === 0 ? (
+            <SectionEmpty>Every property fits this customer.</SectionEmpty>
+          ) : (
+            buckets.hold.map((d) => (
+              <PropertyMatchCard
+                key={d.property._id}
+                variant="hold"
+                property={d.property}
+                decision={d.decision}
+                client={client}
+                isOpen={false}
+                onToggle={() => {}}
+                actions={actions}
+                toast={toast}
+              />
+            ))
+          )}
+        </AssignmentSection>
       </div>
     </div>
   )
@@ -545,21 +778,75 @@ function Fact({ label, value, big, small }) {
   )
 }
 
-function BucketTabs({ bucket, onBucket, sendCount, holdCount, sendLabel = 'Send', holdLabel = "Don't send" }) {
+function AssignmentSection({ title, subtitle, count, kind, children }) {
   return (
-    <div className="bucket-tabs">
-      <button className={`bucket-tab ${bucket === 'send' ? 'on' : ''}`} onClick={() => onBucket('send')}>
-        <Icon name="send" size={14} /> {sendLabel} <span className="count">{sendCount}</span>
-      </button>
-      <button className={`bucket-tab ${bucket === 'hold' ? 'on' : ''}`} onClick={() => onBucket('hold')}>
-        <Icon name="x" size={14} /> {holdLabel} <span className="count">{holdCount}</span>
-      </button>
+    <div className={`assignment-section assignment-section--${kind}`}>
+      <div className="assignment-section-head">
+        <span className="assignment-section-title">{title}</span>
+        <span className="assignment-section-count">{count}</span>
+        {subtitle && <span className="assignment-section-sub">{subtitle}</span>}
+      </div>
+      <div className="assignment-section-body">{children}</div>
     </div>
   )
 }
 
-function ClientMatchCard({ rank, verdict, response, decision, property, isOpen, onToggle, toast }) {
-  const isSend = verdict === 'send'
+function SectionEmpty({ children }) {
+  return <div className="assignment-section-empty">{children}</div>
+}
+
+function ScorePair({ pinnedScore, currentScore }) {
+  if (pinnedScore === undefined && currentScore === undefined) return null
+  if (pinnedScore === undefined) {
+    return (
+      <span className="score-pair">
+        <span className="score-pair-now">{currentScore}/100</span>
+      </span>
+    )
+  }
+  if (currentScore === undefined || currentScore === pinnedScore) {
+    return (
+      <span className="score-pair">
+        <span className="score-pair-pin">pinned at {pinnedScore}</span>
+      </span>
+    )
+  }
+  return (
+    <span className="score-pair">
+      <span className="score-pair-pin">pinned at {pinnedScore}</span>
+      <span className="score-pair-sep">·</span>
+      <span className="score-pair-now">now {currentScore}</span>
+    </span>
+  )
+}
+
+function relativeTime(ms) {
+  if (!ms) return ''
+  const diff = Date.now() - ms
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return 'just now'
+  if (min < 60) return `${min}m ago`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr}h ago`
+  const d = Math.floor(hr / 24)
+  if (d < 14) return `${d}d ago`
+  return new Date(ms).toLocaleDateString('en-SG', { month: 'short', day: 'numeric' })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Match cards — render a single (property, client) pair in one of four
+// variants:
+//   suggestion — live decide() Send-bucket row, [Pin] available
+//   must-send  — pinned not sent, [Mark sent] + [Unpin] + [Draft] available
+//   sent       — read-only audit row, [Draft] (for reference) available
+//   hold       — decide() Hold-bucket row, [Override and pin] gated by confirm
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ClientMatchCard({ variant, rank, response, decision, property, assignment, isOpen, onToggle, actions, toast }) {
+  const isSuggestion = variant === 'suggestion'
+  const isMustSend = variant === 'must-send'
+  const isSent = variant === 'sent'
+  const isHold = variant === 'hold'
   const draft = React.useMemo(
     () => draftMessage(response, property, decision),
     [response, property, decision],
@@ -570,10 +857,51 @@ function ClientMatchCard({ rank, verdict, response, decision, property, isOpen, 
     toast?.('Draft copied — paste into Line/IG.')
   }
 
+  const onPin = async () => {
+    await actions.pin({
+      propertyId: property._id,
+      responseId: response._id,
+      pinnedScore: decision.score,
+    })
+  }
+
+  const onOverridePin = async () => {
+    const ok = window.confirm(
+      `This client scored ${decision.score}/100 (below send threshold). Pin anyway?`,
+    )
+    if (!ok) return
+    await actions.pin({
+      propertyId: property._id,
+      responseId: response._id,
+      pinnedScore: decision.score,
+      pinnedReason: 'operator-override',
+    })
+  }
+
+  const onUnpin = async () => {
+    if (!assignment) return
+    await actions.unpin(assignment._id)
+  }
+
+  const onMarkSent = async () => {
+    if (!assignment) return
+    await actions.markSent(assignment._id, response.channel)
+  }
+
   return (
     <div className="match-card">
       <div className="match-rank">
-        {isSend ? (
+        {isMustSend ? (
+          <>
+            <Icon name="check" size={20} />
+            <span className="small">Pinned</span>
+          </>
+        ) : isSent ? (
+          <>
+            <Icon name="send" size={20} />
+            <span className="small">Sent</span>
+          </>
+        ) : isSuggestion ? (
           <>
             #{rank}
             <span className="small">Rank</span>
@@ -597,8 +925,25 @@ function ClientMatchCard({ rank, verdict, response, decision, property, isOpen, 
           Budget S${response.budget.min}–{response.budget.max} · Move-in {response.moveIn || '—'} · Commute tol.{' '}
           {response.commuteTolMins}min
         </div>
-        <div className="reason" style={{ color: isSend ? 'var(--ink)' : 'var(--danger)' }}>
-          {isSend ? (
+        {(isMustSend || isSent) && assignment && (
+          <div className="meta">
+            <ScorePair pinnedScore={assignment.pinnedScore} currentScore={decision.score} />
+            {isMustSend && (
+              <span style={{ marginLeft: 10 }}>pinned {relativeTime(assignment.pinnedAt)}</span>
+            )}
+            {isSent && (
+              <span style={{ marginLeft: 10 }}>
+                sent {relativeTime(assignment.sentAt)}{assignment.sentVia ? ` · via ${assignment.sentVia}` : ''}
+              </span>
+            )}
+          </div>
+        )}
+        <div className="reason" style={{ color: isHold ? 'var(--danger)' : 'var(--ink)' }}>
+          {isMustSend ? (
+            <Pill kind="navy" dot>Must send</Pill>
+          ) : isSent ? (
+            <Pill kind="green" dot>Sent</Pill>
+          ) : isSuggestion ? (
             <Pill kind="green" dot>Send</Pill>
           ) : (
             <Pill kind="danger" dot>Hold</Pill>
@@ -632,18 +977,45 @@ function ClientMatchCard({ rank, verdict, response, decision, property, isOpen, 
         )}
       </div>
       <div className="match-actions">
-        {isSend ? (
+        {isSuggestion && (
           <>
             <div className="match-score">{decision.score}<span className="total">/100</span></div>
-            <button className="btn btn-primary btn-sm" onClick={onToggle}>
-              <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft message'}
+            <button className="btn btn-primary btn-sm" onClick={onPin}>
+              <Icon name="check" size={12} /> Pin
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onToggle}>
+              <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
             </button>
           </>
-        ) : (
-          <div style={{ fontSize: 11, color: 'var(--ink-mute)', textAlign: 'right', maxWidth: 140 }}>
-            Score {decision.score}/100
-            <br />
-            Held back, not blasted.
+        )}
+        {isMustSend && (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={onMarkSent}>
+              <Icon name="send" size={12} /> Mark sent
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onToggle}>
+              <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onUnpin}>
+              Unpin
+            </button>
+          </>
+        )}
+        {isSent && (
+          <button className="btn btn-ghost btn-sm" onClick={onToggle}>
+            <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
+          </button>
+        )}
+        {isHold && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-mute)', textAlign: 'right', maxWidth: 140 }}>
+              Score {decision.score}/100
+              <br />
+              Held back, not blasted.
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={onOverridePin}>
+              Override and pin
+            </button>
           </div>
         )}
       </div>
@@ -651,12 +1023,15 @@ function ClientMatchCard({ rank, verdict, response, decision, property, isOpen, 
   )
 }
 
-function PropertyMatchCard({ rank, verdict, property, decision, client, isOpen, onToggle, toast }) {
-  const isSend = verdict === 'send'
-  const isUnextracted = decision.blockers.includes('unextracted')
+function PropertyMatchCard({ variant, rank, property, decision, client, assignment, isOpen, onToggle, actions, toast }) {
+  const isSuggestion = variant === 'suggestion'
+  const isMustSend = variant === 'must-send'
+  const isSent = variant === 'sent'
+  const isHold = variant === 'hold'
+  const isUnextracted = decision.blockers?.includes('unextracted')
   const draft = React.useMemo(
-    () => (client && isSend ? draftMessage(client, property, decision) : ''),
-    [client, property, decision, isSend],
+    () => (client && !isHold ? draftMessage(client, property, decision) : ''),
+    [client, property, decision, isHold],
   )
 
   const copy = () => {
@@ -664,10 +1039,51 @@ function PropertyMatchCard({ rank, verdict, property, decision, client, isOpen, 
     toast?.('Draft copied — paste into Line/IG.')
   }
 
+  const onPin = async () => {
+    await actions.pin({
+      propertyId: property._id,
+      responseId: client._id,
+      pinnedScore: decision.score,
+    })
+  }
+
+  const onOverridePin = async () => {
+    const ok = window.confirm(
+      `This property scored ${decision.score}/100 against this client (below send threshold). Pin anyway?`,
+    )
+    if (!ok) return
+    await actions.pin({
+      propertyId: property._id,
+      responseId: client._id,
+      pinnedScore: decision.score,
+      pinnedReason: 'operator-override',
+    })
+  }
+
+  const onUnpin = async () => {
+    if (!assignment) return
+    await actions.unpin(assignment._id)
+  }
+
+  const onMarkSent = async () => {
+    if (!assignment) return
+    await actions.markSent(assignment._id, client.channel)
+  }
+
   return (
     <div className="match-card">
       <div className="match-rank">
-        {isSend ? (
+        {isMustSend ? (
+          <>
+            <Icon name="check" size={20} />
+            <span className="small">Pinned</span>
+          </>
+        ) : isSent ? (
+          <>
+            <Icon name="send" size={20} />
+            <span className="small">Sent</span>
+          </>
+        ) : isSuggestion ? (
           <>
             #{rank}
             <span className="small">Rank</span>
@@ -695,8 +1111,25 @@ function PropertyMatchCard({ rank, verdict, property, decision, client, isOpen, 
             : ''}
           {property.posterStorageId ? ' · poster ready' : ' · no poster yet'}
         </div>
-        <div className="reason" style={{ color: isSend ? 'var(--ink)' : 'var(--danger)' }}>
-          {isSend ? (
+        {(isMustSend || isSent) && assignment && (
+          <div className="meta">
+            <ScorePair pinnedScore={assignment.pinnedScore} currentScore={decision.score} />
+            {isMustSend && (
+              <span style={{ marginLeft: 10 }}>pinned {relativeTime(assignment.pinnedAt)}</span>
+            )}
+            {isSent && (
+              <span style={{ marginLeft: 10 }}>
+                sent {relativeTime(assignment.sentAt)}{assignment.sentVia ? ` · via ${assignment.sentVia}` : ''}
+              </span>
+            )}
+          </div>
+        )}
+        <div className="reason" style={{ color: isHold ? 'var(--danger)' : 'var(--ink)' }}>
+          {isMustSend ? (
+            <Pill kind="navy" dot>Must send</Pill>
+          ) : isSent ? (
+            <Pill kind="green" dot>Sent</Pill>
+          ) : isSuggestion ? (
             <Pill kind="green" dot>Send</Pill>
           ) : isUnextracted ? (
             <Pill kind="warn" dot>Pending</Pill>
@@ -716,7 +1149,7 @@ function PropertyMatchCard({ rank, verdict, property, decision, client, isOpen, 
           </div>
         )}
 
-        {isOpen && (
+        {isOpen && draft && (
           <div className="draft">
             <div className="draft-head">
               <span className="t">
@@ -736,18 +1169,47 @@ function PropertyMatchCard({ rank, verdict, property, decision, client, isOpen, 
         )}
       </div>
       <div className="match-actions">
-        {isSend ? (
+        {isSuggestion && (
           <>
             <div className="match-score">{decision.score}<span className="total">/100</span></div>
-            <button className="btn btn-primary btn-sm" onClick={onToggle}>
-              <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft message'}
+            <button className="btn btn-primary btn-sm" onClick={onPin}>
+              <Icon name="check" size={12} /> Pin
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onToggle}>
+              <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
             </button>
           </>
-        ) : (
-          <div style={{ fontSize: 11, color: 'var(--ink-mute)', textAlign: 'right', maxWidth: 160 }}>
-            {isUnextracted ? 'Awaits extraction' : `Score ${decision.score}/100`}
-            <br />
-            {isUnextracted ? 'Attach a poster.' : 'Held back, not blasted.'}
+        )}
+        {isMustSend && (
+          <>
+            <button className="btn btn-primary btn-sm" onClick={onMarkSent}>
+              <Icon name="send" size={12} /> Mark sent
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onToggle}>
+              <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={onUnpin}>
+              Unpin
+            </button>
+          </>
+        )}
+        {isSent && (
+          <button className="btn btn-ghost btn-sm" onClick={onToggle}>
+            <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
+          </button>
+        )}
+        {isHold && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6 }}>
+            <div style={{ fontSize: 11, color: 'var(--ink-mute)', textAlign: 'right', maxWidth: 160 }}>
+              {isUnextracted ? 'Awaits extraction' : `Score ${decision.score}/100`}
+              <br />
+              {isUnextracted ? 'Attach a poster.' : 'Held back, not blasted.'}
+            </div>
+            {!isUnextracted && (
+              <button className="btn btn-ghost btn-sm" onClick={onOverridePin}>
+                Override and pin
+              </button>
+            )}
           </div>
         )}
       </div>

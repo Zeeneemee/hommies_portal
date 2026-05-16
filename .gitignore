@@ -10,3 +10,7 @@ dist
 
 # Convex generates this on every `convex dev` — keep out of the repo.
 convex/_generated
+.vercel
+
+# Local development snapshots / artifacts
+.convex-dev-snapshot.zip
