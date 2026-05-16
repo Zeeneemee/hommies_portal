@@ -1,14 +1,17 @@
 import React from 'react'
+import { useMutation } from 'convex/react'
 import { Pill, StatusPill, Icon } from './ui.jsx'
+import ListingEditModal from './ListingEditModal.jsx'
 
 // Screen 4 — card-based inventory of every property the portal is holding.
-// As of simplify-add-property, each card renders the property as its
-// collection of assets: the uploaded image gallery (hero + thumbnails), the
-// poster (if attached), the four key facts as lifted from the poster (with
-// "—" placeholders when extraction hasn't run / didn't find them), the rent
-// when known, and the dispatch pill.
-export default function ListingsScreen({ properties }) {
+// Each card supports inline CRUD: edit fields via the modal (properties:update),
+// advance / reopen the pipeline status (properties:advanceStatus — same mutation
+// the Status screen uses, so the two screens stay in sync via Convex's reactive
+// useQuery), and delete (properties:remove, which also cleans up the poster
+// from storage).
+export default function ListingsScreen({ properties, toast }) {
   const [filter, setFilter] = React.useState('All')
+  const [editingId, setEditingId] = React.useState(null)
 
   const filtered = properties.filter((p) => {
     if (filter === 'All') return true
@@ -20,6 +23,7 @@ export default function ListingsScreen({ properties }) {
     if (kind === 'Pending poster') return properties.filter((p) => !p.posterStorageId).length
     return properties.filter((p) => p.buildingType === kind).length
   }
+  const editing = editingId ? properties.find((p) => p._id === editingId) : null
 
   return (
     <div>
@@ -29,7 +33,7 @@ export default function ListingsScreen({ properties }) {
           <h1 className="page-title">Listings</h1>
           <p className="page-sub">
             Every property as its collection of assets — photos, poster, and the facts lifted from the poster.
-            Properties still waiting for poster extraction show "—" in place of any missing fact.
+            Use the per-card buttons to edit, advance status, or remove.
           </p>
         </div>
       </div>
@@ -61,18 +65,86 @@ export default function ListingsScreen({ properties }) {
 
       <div className="listings-grid">
         {filtered.map((p) => (
-          <ListingCard key={p._id} property={p} />
+          <ListingCard key={p._id} property={p} onEdit={() => setEditingId(p._id)} toast={toast} />
         ))}
       </div>
+
+      {editing && (
+        <ListingEditController
+          property={editing}
+          onClose={() => setEditingId(null)}
+          toast={toast}
+        />
+      )}
     </div>
   )
 }
 
-function ListingCard({ property: p }) {
+// Holds the update mutation outside the card so closing the modal cancels
+// any in-flight thinking cleanly without unmounting the card itself.
+function ListingEditController({ property, onClose, toast }) {
+  const update = useMutation('properties:update')
+  async function handleSave(patch) {
+    try {
+      await update({ id: property._id, patch })
+      toast?.(`${property.condo} updated.`)
+      onClose()
+    } catch (err) {
+      toast?.(`Update failed: ${err.message || err}`)
+    }
+  }
+  return <ListingEditModal property={property} onClose={onClose} onSave={handleSave} />
+}
+
+function ListingCard({ property: p, onEdit, toast }) {
+  const advanceStatus = useMutation('properties:advanceStatus')
+  const removeProperty = useMutation('properties:remove')
+  const [busy, setBusy] = React.useState(false)
   const images = p.images || []
   const hero = images[0]
   const rest = images.slice(1, 5)
-  const fallback = (v, suffix = '') => (v != null && v !== '' ? `${v}${suffix}` : '—')
+
+  const advanceLabel =
+    p.status === 'data_received'
+      ? 'Attach poster on Status →'
+      : p.status === 'poster_attached'
+      ? 'Mark sent'
+      : 'Reopen'
+
+  const canAdvance = p.status !== 'data_received'
+
+  async function handleAdvance() {
+    if (!canAdvance) {
+      toast?.('Attach a poster on the Status screen before advancing.')
+      return
+    }
+    setBusy(true)
+    try {
+      await advanceStatus({ id: p._id })
+      toast?.(
+        p.status === 'poster_attached' ? 'Marked as sent.' : 'Reopened for redispatch.',
+      )
+    } catch (err) {
+      toast?.(`Status change failed: ${err.message || err}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete "${p.condo}"? This removes the property and its poster from storage.`)) {
+      return
+    }
+    setBusy(true)
+    try {
+      await removeProperty({ id: p._id })
+      toast?.(`${p.condo} deleted.`)
+    } catch (err) {
+      toast?.(`Delete failed: ${err.message || err}`)
+      setBusy(false)
+    }
+    // No setBusy(false) on success — the card is about to unmount.
+  }
 
   return (
     <div key={p._id} className="listing">
@@ -144,13 +216,6 @@ function ListingCard({ property: p }) {
       <div className="listing-body">
         <div className="listing-name">{p.condo}</div>
 
-        <div className="listing-facts">
-          <Fact label="Room type" value={fallback(p.unitType)} />
-          <Fact label="Building" value={fallback(p.buildingType)} />
-          <Fact label="Area" value={fallback(p.area)} />
-          <Fact label="Age" value={p.ageYears ? `${p.ageYears} yrs` : '—'} />
-        </div>
-
         <div className="listing-foot">
           <div className="rent">
             {p.rentSGD ? (
@@ -171,16 +236,35 @@ function ListingCard({ property: p }) {
             <StatusPill status={p.status} />
           </div>
         </div>
-      </div>
-    </div>
-  )
-}
 
-function Fact({ label, value }) {
-  return (
-    <div>
-      <div className="fact-label">{label}</div>
-      <div className="fact-val">{value}</div>
+        <div className="listing-actions">
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onEdit}
+            disabled={busy}
+          >
+            Edit
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={handleAdvance}
+            disabled={busy || !canAdvance}
+            title={canAdvance ? '' : 'Attach a poster on the Status screen first.'}
+          >
+            {p.status === 'poster_attached' && <Icon name="check" size={12} />} {advanceLabel}
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm btn-danger"
+            onClick={handleDelete}
+            disabled={busy}
+          >
+            <Icon name="trash" size={12} /> Delete
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

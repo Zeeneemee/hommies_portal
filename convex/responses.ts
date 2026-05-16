@@ -1,5 +1,5 @@
 // Convex functions for form responses (the recipient database).
-import { mutation, query } from './_generated/server'
+import { internalMutation, mutation, query } from './_generated/server'
 import { v } from 'convex/values'
 
 const responseFields = {
@@ -23,6 +23,7 @@ const responseFields = {
     note: v.string(),
   }),
   source: v.optional(v.string()),
+  sheetTimestamp: v.optional(v.string()),
 }
 
 export const list = query({
@@ -52,4 +53,33 @@ export const addMany = mutation({
 export const remove = mutation({
   args: { id: v.id('responses') },
   handler: async (ctx, { id }) => ctx.db.delete(id),
+})
+
+// Internal upsert called by the /sheet/sync HTTP action. Rows must already
+// be normalised to the responses shape (the HTTP handler does that). Each
+// row is keyed by sheetTimestamp — if a response with the same timestamp
+// already exists, the row is skipped; otherwise it is inserted.
+export const upsertFromSheet = internalMutation({
+  args: { responses: v.array(v.object(responseFields)) },
+  handler: async (ctx, { responses }) => {
+    const now = Date.now()
+    let inserted = 0
+    let skipped = 0
+    for (const r of responses) {
+      const ts = r.sheetTimestamp
+      if (ts) {
+        const existing = await ctx.db
+          .query('responses')
+          .withIndex('by_sheetTimestamp', (q) => q.eq('sheetTimestamp', ts))
+          .first()
+        if (existing) {
+          skipped += 1
+          continue
+        }
+      }
+      await ctx.db.insert('responses', { ...r, source: r.source ?? 'sheet', createdAt: now })
+      inserted += 1
+    }
+    return { inserted, skipped }
+  },
 })

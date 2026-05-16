@@ -176,7 +176,7 @@ export default function App() {
               <RecommendScreen toast={toast} properties={properties} responses={responses} />
             }
           />
-          <Route path="/listings" element={<ListingsScreen properties={properties} />} />
+          <Route path="/listings" element={<ListingsScreen properties={properties} toast={toast} />} />
           <Route
             path="/customers"
             element={<CustomersScreen toast={toast} responses={responses} />}

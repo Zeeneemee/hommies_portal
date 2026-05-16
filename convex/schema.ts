@@ -91,6 +91,12 @@ export default defineSchema({
       note: v.string(),
     }),
     source: v.optional(v.string()),
+    // Google-Sheet submission timestamp — used as the natural dedup key
+    // by the /sheet/sync HTTP action so re-runs of the Apps Script trigger
+    // never insert the same form submission twice.
+    sheetTimestamp: v.optional(v.string()),
     createdAt: v.number(),
-  }).index('by_createdAt', ['createdAt']),
+  })
+    .index('by_createdAt', ['createdAt'])
+    .index('by_sheetTimestamp', ['sheetTimestamp']),
 })

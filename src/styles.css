@@ -764,6 +764,19 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
 .rent { font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--orange); }
 .rent .pm { font-size: 10px; color: var(--ink-mute); font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; }
 
+.listing-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--hairline);
+}
+.listing-actions .btn { flex: 1; justify-content: center; }
+.btn-danger {
+  color: var(--danger);
+}
+.btn-danger:hover { background: var(--danger-soft); }
+
 /* Poster prompt builder */
 .prompt-summary {
   display: flex;
