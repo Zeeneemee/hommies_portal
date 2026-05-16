@@ -243,7 +243,10 @@ export function parseGoogleFormCSV(text) {
   const col = {
     name: findCol('姓名', 'name'),
     channel: findCol('管道', 'channel'),
-    contact: findCol('聯繫方式', '聯絡方式', 'contact'),
+    // Be specific: the channel header also contains the word "contact"
+    // ("Preferred Contact Channel"), so a plain 'contact' needle would
+    // grab that column instead of the actual contact-details one.
+    contact: findCol('聯繫方式', '聯絡方式', 'contact details', 'details'),
     school: findCol('學校', '学校', 'school'),
     moveIn: findCol('入住', 'move-in', 'move in'),
     lease: findCol('租約', '租约', 'lease'),

@@ -1,28 +1,33 @@
 import React from 'react'
+import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from 'convex/react'
 import AddProperty from './components/AddProperty.jsx'
 import StatusScreen from './components/Status.jsx'
 import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
+import CustomersScreen from './components/Customers.jsx'
 import { Toast, Icon } from './components/ui.jsx'
 import logoUrl from './assets/logo.png'
 
 // The portal shell — navy left sidebar on desktop, off-canvas drawer on
-// mobile (triggered by the hamburger button in the mobile top bar). The
-// nav order IS the workflow; the portal opens straight onto Add Property.
+// mobile (triggered by the hamburger button in the mobile top bar). URL
+// routes drive the active screen — refresh / share / back-button all work.
+// The nav order is the workflow; the portal opens straight onto Add Property.
 
 const NAV = [
-  { id: 'add', label: 'Add Property', step: 1 },
-  { id: 'status', label: 'Status', step: 2 },
-  { id: 'recommend', label: 'Recommend', step: 3 },
-  { id: 'listings', label: 'Listings', step: 4 },
+  { id: 'add', to: '/add', label: 'Add Property', step: 1 },
+  { id: 'status', to: '/status', label: 'Status', step: 2 },
+  { id: 'recommend', to: '/recommend', label: 'Recommend', step: 3 },
+  { id: 'listings', to: '/listings', label: 'Listings', step: 4 },
+  { id: 'customers', to: '/customers', label: 'Customers', step: 5 },
 ]
 
 export default function App() {
-  const [active, setActive] = React.useState('add')
   const [toastMsg, setToastMsg] = React.useState('')
   const [navOpen, setNavOpen] = React.useState(false)
   const toast = (m) => setToastMsg(m)
+  const location = useLocation()
+  const navigate = useNavigate()
 
   const linked = !!import.meta.env.VITE_CONVEX_URL
   const properties = useQuery('properties:list') ?? []
@@ -35,6 +40,7 @@ export default function App() {
     status: properties.length,
     recommend: responses.length,
     listings: properties.length,
+    customers: responses.length,
   }
 
   const today = new Date().toLocaleDateString('en-SG', {
@@ -43,11 +49,13 @@ export default function App() {
     day: 'numeric',
   })
 
-  // Close the drawer whenever the user picks a nav item.
-  function pickScreen(id) {
-    setActive(id)
-    setNavOpen(false)
-  }
+  const activeLabel = React.useMemo(() => {
+    const hit = NAV.find((n) => location.pathname.startsWith(n.to))
+    return hit?.label || ''
+  }, [location.pathname])
+
+  // Close the drawer whenever a nav item is picked.
+  const closeNav = () => setNavOpen(false)
 
   // Lock body scroll while the drawer is open so the page underneath
   // doesn't scroll behind it on mobile.
@@ -60,8 +68,6 @@ export default function App() {
       }
     }
   }, [navOpen])
-
-  const activeLabel = NAV.find((n) => n.id === active)?.label || ''
 
   return (
     <div className="app">
@@ -92,16 +98,16 @@ export default function App() {
           <div className="nav-label">Workflow</div>
           <div className="nav">
             {NAV.map((n) => (
-              <button
+              <NavLink
                 key={n.id}
-                className={`nav-item ${active === n.id ? 'active' : ''}`}
-                onClick={() => pickScreen(n.id)}
-                type="button"
+                to={n.to}
+                onClick={closeNav}
+                className={({ isActive }) => `nav-item ${isActive ? 'active' : ''}`}
               >
                 <span className="nav-step">{n.step}</span>
                 {n.label}
                 {counts[n.id] !== '' && <span className="nav-count">{counts[n.id]}</span>}
-              </button>
+              </NavLink>
             ))}
           </div>
         </div>
@@ -115,18 +121,32 @@ export default function App() {
 
       {/* Backdrop only renders / fires on mobile when the drawer is open. */}
       {navOpen && (
-        <div className="sidebar-backdrop" onClick={() => setNavOpen(false)} aria-hidden="true" />
+        <div className="sidebar-backdrop" onClick={closeNav} aria-hidden="true" />
       )}
 
-      <main className="main" data-screen-label={active}>
-        {active === 'add' && (
-          <AddProperty toast={toast} onSaved={() => setActive('status')} properties={properties} />
-        )}
-        {active === 'status' && <StatusScreen toast={toast} properties={properties} />}
-        {active === 'recommend' && (
-          <RecommendScreen toast={toast} properties={properties} responses={responses} />
-        )}
-        {active === 'listings' && <ListingsScreen properties={properties} />}
+      <main className="main" data-screen-label={activeLabel}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/add" replace />} />
+          <Route
+            path="/add"
+            element={
+              <AddProperty toast={toast} onSaved={() => navigate('/status')} properties={properties} />
+            }
+          />
+          <Route path="/status" element={<StatusScreen toast={toast} properties={properties} />} />
+          <Route
+            path="/recommend"
+            element={
+              <RecommendScreen toast={toast} properties={properties} responses={responses} />
+            }
+          />
+          <Route path="/listings" element={<ListingsScreen properties={properties} />} />
+          <Route
+            path="/customers"
+            element={<CustomersScreen toast={toast} responses={responses} />}
+          />
+          <Route path="*" element={<Navigate to="/add" replace />} />
+        </Routes>
 
         <div className="footer-strip">
           <span>
