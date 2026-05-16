@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+
+# Env files — secrets stay local. Allow .env.example for documenting shape.
+.env
+.env.*
+!.env.example
+*.local
+
+# Convex generates this on every `convex dev` — keep out of the repo.
+convex/_generated
