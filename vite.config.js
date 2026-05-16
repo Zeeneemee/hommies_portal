@@ -6,6 +6,10 @@ import react from '@vitejs/plugin-react'
 // src/**/*.test.{js,jsx} and convex/**/*.test.ts.
 export default defineConfig({
   plugins: [react()],
+  server: {
+    host: true,
+    allowedHosts: ['.ngrok-free.app'],
+  },
   test: {
     environment: 'node',
     include: ['src/**/*.test.{js,jsx}', 'convex/**/*.test.ts'],

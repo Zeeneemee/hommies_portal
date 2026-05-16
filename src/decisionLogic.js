@@ -228,10 +228,10 @@ export function draftMessage(resp, prop, decision) {
 
 /** Parse a Google Form CSV export into normalised response records. */
 export function parseGoogleFormCSV(text) {
-  const lines = (text || '').split(/\r?\n/).filter((l) => l.trim().length > 0)
-  if (lines.length < 2) return []
-  const headers = splitCSVLine(lines[0])
-  const rows = lines.slice(1).map(splitCSVLine)
+  const records = parseCSV(text || '')
+  if (records.length < 2) return []
+  const headers = records[0]
+  const rows = records.slice(1).filter((r) => r.some((c) => (c || '').trim().length > 0))
 
   const findCol = (...needles) => {
     for (let i = 0; i < headers.length; i++) {
@@ -329,28 +329,52 @@ function parseCommute(s) {
   return m ? +m[1] : 30
 }
 
-function splitCSVLine(line) {
-  const out = []
-  let cur = ''
+// RFC-4180-ish CSV tokenizer: quote-aware across newlines, supports "" escapes,
+// handles CRLF / LF / bare CR. Returns an array of rows (each row an array of
+// cells). Empty trailing newlines are dropped.
+function parseCSV(text) {
+  const rows = []
+  let row = []
+  let cell = ''
   let inQ = false
-  for (let i = 0; i < line.length; i++) {
-    const c = line[i]
-    if (c === '"' && line[i + 1] === '"') {
-      cur += '"'
-      i++
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i]
+    if (inQ) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"'
+          i++
+        } else {
+          inQ = false
+        }
+      } else {
+        cell += c
+      }
       continue
     }
     if (c === '"') {
-      inQ = !inQ
+      inQ = true
       continue
     }
-    if (c === ',' && !inQ) {
-      out.push(cur)
-      cur = ''
+    if (c === ',') {
+      row.push(cell)
+      cell = ''
       continue
     }
-    cur += c
+    if (c === '\r' || c === '\n') {
+      // Consume CRLF as one separator.
+      if (c === '\r' && text[i + 1] === '\n') i++
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+      continue
+    }
+    cell += c
   }
-  out.push(cur)
-  return out
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell)
+    rows.push(row)
+  }
+  return rows
 }

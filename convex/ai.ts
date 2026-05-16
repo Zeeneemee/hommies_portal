@@ -27,7 +27,11 @@ import { action } from './_generated/server'
 import { v } from 'convex/values'
 import { GoogleGenAI } from '@google/genai'
 
-const GEMINI_MODEL = 'gemini-2.0-flash'
+// The deployment's GEMINI_MODEL env var overrides this — useful when free-tier
+// availability for one model vanishes (e.g. gemini-2.0-flash is `limit: 0` in
+// some regions). `gemini-2.5-flash` is the current sensible default for
+// vision + short-text generation and has wider regional availability.
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 
 // An image carried inline so Gemini Vision can look at it. `dataB64` is the
 // raw base64 (no `data:...;base64,` prefix). `name` is metadata only — it
@@ -92,6 +96,7 @@ export const generatePosterPrompt = action({
       }
     }
 
+    const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL
     try {
       const ai = new GoogleGenAI({ apiKey })
       const parts: any[] = [{ text: describeProperty(property.condo, photoCount) }]
@@ -99,7 +104,7 @@ export const generatePosterPrompt = action({
         parts.push({ inlineData: { mimeType: img.mimeType, data: img.dataB64 } })
       }
       const response = await ai.models.generateContent({
-        model: GEMINI_MODEL,
+        model,
         contents: [{ role: 'user', parts }],
         config: {
           systemInstruction: SYSTEM_INSTRUCTION,
@@ -112,19 +117,19 @@ export const generatePosterPrompt = action({
         return {
           prompt: null,
           source: 'error' as const,
-          note: 'Gemini returned an empty or malformed message — retry, or check the model output.',
+          note: `Gemini (${model}) returned an empty or malformed message — retry, or try another model via the GEMINI_MODEL env var.`,
         }
       }
       return {
         prompt: text,
         source: 'gemini' as const,
-        note: `Generated with ${GEMINI_MODEL} · vision (${photoCount} photo${photoCount === 1 ? '' : 's'} analysed).`,
+        note: `Generated with ${model} · vision (${photoCount} photo${photoCount === 1 ? '' : 's'} analysed).`,
       }
     } catch (err: any) {
       return {
         prompt: null,
         source: 'error' as const,
-        note: `Gemini call failed: ${err?.message || 'unknown error'}`,
+        note: explainGeminiError(err, model),
       }
     }
   },
@@ -138,4 +143,30 @@ function describeProperty(condo: string, photoCount: number): string {
     '',
     `Attached: ${photoCount} photo${photoCount === 1 ? '' : 's'} — look at them and weave what you observe into the "What the photos show" block. The user will attach these same photos to their own Claude chat from their device, so reference them only collectively (never by filename).`,
   ].join('\n')
+}
+
+// Surface the most common Gemini errors as a tight, action-oriented line so
+// the warn-notice in PosterPromptCard tells the admin exactly what to do
+// rather than dumping the raw JSON payload.
+function explainGeminiError(err: any, model: string): string {
+  const msg = String(err?.message || err || 'unknown error')
+
+  // The "your project has zero free-tier quota" case — usually a regional
+  // restriction (Singapore among others) rather than rate-limiting.
+  if (msg.includes('limit: 0')) {
+    return `Gemini (${model}) reports your project has no quota for this model (limit: 0 — a regional or free-tier restriction). Enable billing on the Google Cloud project that owns this key, or set the GEMINI_MODEL Convex env var to a model your project can call (e.g. gemini-1.5-flash, gemini-2.5-flash, gemini-flash-latest).`
+  }
+  // The "you used your daily allowance" case.
+  if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED')) {
+    return `Gemini (${model}) returned 429 (rate limit / quota). Wait a moment and retry, enable billing for a higher quota, or switch model via the GEMINI_MODEL Convex env var.`
+  }
+  // The "wrong / missing key" case.
+  if (msg.includes('401') || msg.includes('API key') || msg.includes('invalid')) {
+    return `Gemini (${model}) rejected the API key. Re-issue a key at aistudio.google.com/apikey and update it with: npx convex env set GEMINI_API_KEY <new-key>.`
+  }
+  // The "model not found / not enabled" case — common when swapping models.
+  if (msg.includes('not found') || msg.includes('NOT_FOUND') || msg.includes('does not exist')) {
+    return `Gemini reports model "${model}" is not available for your project. Check available models in AI Studio and set the GEMINI_MODEL Convex env var to a valid one.`
+  }
+  return `Gemini (${model}) call failed: ${msg}`
 }
