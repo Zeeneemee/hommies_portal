@@ -1446,3 +1446,29 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   .customer-stats .customer-stat:first-child { grid-column: span 2; }
   .customers-grid { grid-template-columns: 1fr; }
 }
+
+/* ============ STATUS ROW — extraction meta + stacked actions ============ */
+.row-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.row-actions__extract {
+  font-size: 11.5px;
+  padding: 5px 10px;
+  color: var(--ink-soft);
+}
+.row-actions__extract:hover { color: var(--orange); }
+.row-actions__extract:disabled { opacity: 0.6; cursor: progress; }
+
+.extract-meta {
+  font-size: 10.5px;
+  font-weight: 600;
+  margin-top: 4px;
+  letter-spacing: 0.02em;
+}
+.extract-meta--ok { color: var(--green); }
+.extract-meta--empty { color: var(--danger); }
+.extract-meta--pending { color: var(--ink-mute); }
+.extract-meta--busy { color: var(--orange); }
