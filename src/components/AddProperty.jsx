@@ -15,25 +15,18 @@ import PosterPromptCard from './PosterPromptCard.jsx'
 
 const IMAGE_CAP = 12
 
-export default function AddProperty({ toast, onSaved }) {
+export default function AddProperty({ toast, onSaved, draft }) {
   const addProperty = useMutation('properties:add')
   const generateUploadUrl = useMutation('properties:generateUploadUrl')
   const extractPosterDetails = useAction('extraction:extractPosterDetails')
 
-  const [condo, setCondo] = React.useState('')
-  const [images, setImages] = React.useState([]) // [{ file, name, size, contentType, previewUrl }]
-  const [posterFile, setPosterFile] = React.useState(null)
+  // Form state is owned by App.jsx (via useAddPropertyDraft) so navigation
+  // between sidebar tabs doesn't unmount it. draft.reset() wipes the form
+  // and clears the localStorage-backed condo name.
+  const { condo, setCondo, images, setImages, posterFile, setPosterFile } = draft
   const [saving, setSaving] = React.useState(false)
   const imagesRef = React.useRef(null)
   const posterRef = React.useRef(null)
-
-  // Release object URLs on unmount so the preview thumbs don't leak.
-  React.useEffect(
-    () => () => {
-      images.forEach((i) => i.previewUrl && URL.revokeObjectURL(i.previewUrl))
-    },
-    [images],
-  )
 
   function handleImagesPicked(files) {
     if (!files?.length) return
@@ -150,11 +143,9 @@ export default function AddProperty({ toast, onSaved }) {
         toast(`${condo} added — make the poster in /room-showcase-pdf and attach it on Status.`)
       }
 
-      // 5. Reset and route to Status.
-      images.forEach((i) => i.previewUrl && URL.revokeObjectURL(i.previewUrl))
-      setCondo('')
-      setImages([])
-      setPosterFile(null)
+      // 5. Reset and route to Status. draft.reset() revokes preview URLs,
+      // clears the in-memory File state, and removes the localStorage condo.
+      draft.reset()
       if (imagesRef.current) imagesRef.current.value = ''
       if (posterRef.current) posterRef.current.value = ''
       onSaved?.()
@@ -197,17 +188,9 @@ export default function AddProperty({ toast, onSaved }) {
           <button
             type="button"
             className="btn btn-ghost"
-            onClick={() => {
-              images.forEach((i) => i.previewUrl && URL.revokeObjectURL(i.previewUrl))
-              setCondo('')
-              setImages([])
-              setPosterFile(null)
-            }}
+            onClick={() => draft.reset()}
           >
             Clear
-          </button>
-          <button type="submit" className="btn btn-primary" disabled={saving}>
-            <Icon name="plus" size={14} /> {saving ? 'Saving…' : 'Save property'}
           </button>
         </div>
       </div>
@@ -329,6 +312,18 @@ export default function AddProperty({ toast, onSaved }) {
             )}
           </label>
         </div>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          marginTop: 18,
+        }}
+      >
+        <button type="submit" className="btn btn-primary" disabled={saving}>
+          <Icon name="plus" size={14} /> {saving ? 'Saving…' : 'Save property'}
+        </button>
       </div>
     </form>
   )

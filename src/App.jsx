@@ -22,12 +22,43 @@ const NAV = [
   { id: 'customers', to: '/customers', label: 'Customers', step: 5 },
 ]
 
+// Add-Property draft, held at the App level so it survives sidebar
+// navigation — switching tabs unmounts the AddProperty screen, so its
+// own useState would wipe the form. condo is mirrored to localStorage so
+// a refresh keeps the name too; File blobs can't be serialized cleanly
+// and stay in-memory only.
+const DRAFT_CONDO_KEY = 'hommies.addProperty.condo'
+function useAddPropertyDraft() {
+  const [condo, setCondo] = React.useState(() => {
+    try { return window.localStorage.getItem(DRAFT_CONDO_KEY) || '' } catch { return '' }
+  })
+  const [images, setImages] = React.useState([])
+  const [posterFile, setPosterFile] = React.useState(null)
+  React.useEffect(() => {
+    try {
+      if (condo) window.localStorage.setItem(DRAFT_CONDO_KEY, condo)
+      else window.localStorage.removeItem(DRAFT_CONDO_KEY)
+    } catch { /* private mode etc. — ignore */ }
+  }, [condo])
+  const reset = React.useCallback(() => {
+    setImages((prev) => {
+      prev.forEach((i) => i.previewUrl && URL.revokeObjectURL(i.previewUrl))
+      return []
+    })
+    setCondo('')
+    setPosterFile(null)
+    try { window.localStorage.removeItem(DRAFT_CONDO_KEY) } catch {}
+  }, [])
+  return { condo, setCondo, images, setImages, posterFile, setPosterFile, reset }
+}
+
 export default function App() {
   const [toastMsg, setToastMsg] = React.useState('')
   const [navOpen, setNavOpen] = React.useState(false)
   const toast = (m) => setToastMsg(m)
   const location = useLocation()
   const navigate = useNavigate()
+  const addDraft = useAddPropertyDraft()
 
   const linked = !!import.meta.env.VITE_CONVEX_URL
   const properties = useQuery('properties:list') ?? []
@@ -130,7 +161,12 @@ export default function App() {
           <Route
             path="/add"
             element={
-              <AddProperty toast={toast} onSaved={() => navigate('/status')} properties={properties} />
+              <AddProperty
+                toast={toast}
+                onSaved={() => navigate('/status')}
+                properties={properties}
+                draft={addDraft}
+              />
             }
           />
           <Route path="/status" element={<StatusScreen toast={toast} properties={properties} />} />
