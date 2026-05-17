@@ -34,6 +34,13 @@ function useAddPropertyDraft() {
   })
   const [images, setImages] = React.useState([])
   const [posterFile, setPosterFile] = React.useState(null)
+  // Fields lifted from a pasted PropertyGuru link — passed through to
+  // properties:add on save. In-memory only; not persisted across reloads.
+  const [extracted, setExtracted] = React.useState(null)
+  // The PG project page URL associated with the listing (e.g.
+  // propertyguru.com.sg/project/lake-grande). When present, the poster
+  // generator scrapes it server-side for verified facilities/nearby copy.
+  const [projectUrl, setProjectUrl] = React.useState(null)
   React.useEffect(() => {
     try {
       if (condo) window.localStorage.setItem(DRAFT_CONDO_KEY, condo)
@@ -47,9 +54,18 @@ function useAddPropertyDraft() {
     })
     setCondo('')
     setPosterFile(null)
+    setExtracted(null)
+    setProjectUrl(null)
     try { window.localStorage.removeItem(DRAFT_CONDO_KEY) } catch {}
   }, [])
-  return { condo, setCondo, images, setImages, posterFile, setPosterFile, reset }
+  return {
+    condo, setCondo,
+    images, setImages,
+    posterFile, setPosterFile,
+    extracted, setExtracted,
+    projectUrl, setProjectUrl,
+    reset,
+  }
 }
 
 export default function App() {

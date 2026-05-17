@@ -29,6 +29,17 @@ export const theme = {
     sans: '"Inter", "Helvetica Neue", Helvetica, Arial, sans-serif',
     display: '"Fraunces", "Inter", Georgia, serif',
   },
+  // Accent palette the in-portal poster generator may pick from. Gemini
+  // returns one of these keys (not arbitrary hex) and the <Poster> template
+  // resolves it to the matching color below. Keep this list short and named
+  // so the LLM output is bounded and easy to validate.
+  posterPalette: {
+    orange: '#fd6925',
+    navy: '#041f60',
+    green: '#1d9e75',
+    cream: '#fff5ec',
+  },
+  posterPaletteDefault: 'orange',
 }
 
 export default theme

@@ -102,11 +102,28 @@ function sanitiseGeminiFields(raw: any): Record<string, unknown> {
   }
   if (num(raw.rentSGD) != null && num(raw.rentSGD)! > 0) out.rentSGD = num(raw.rentSGD)
   if (typeof raw.area === 'string' && raw.area.trim()) out.area = raw.area.trim()
-  if (raw.buildingType === 'Condo' || raw.buildingType === 'HDB') out.buildingType = raw.buildingType
-  if (raw.housingType === 'Room' || raw.housingType === 'Whole Unit') out.housingType = raw.housingType
+  // Be forgiving on the union fields — Gemini sometimes emits "condo" / "Hdb"
+  // / "whole unit" with off-casing. Normalise to the literal values the
+  // schema accepts.
+  if (typeof raw.buildingType === 'string') {
+    const bt = raw.buildingType.trim().toLowerCase()
+    if (bt === 'condo' || bt === 'condominium') out.buildingType = 'Condo'
+    else if (bt === 'hdb') out.buildingType = 'HDB'
+  }
+  if (typeof raw.housingType === 'string') {
+    const ht = raw.housingType.trim().toLowerCase()
+    if (ht === 'room' || ht === 'single room') out.housingType = 'Room'
+    else if (ht === 'whole unit' || ht === 'entire unit' || ht === 'whole-unit') out.housingType = 'Whole Unit'
+  }
   if (num(raw.ageYears) != null && num(raw.ageYears)! >= 0) out.ageYears = num(raw.ageYears)
   if (typeof raw.unitType === 'string' && raw.unitType.trim()) out.unitType = raw.unitType.trim()
   if (typeof raw.fullAddress === 'string' && raw.fullAddress.trim()) out.fullAddress = raw.fullAddress.trim()
+  if (num(raw.sizeSqft) != null && num(raw.sizeSqft)! > 0) out.sizeSqft = num(raw.sizeSqft)
+  if (num(raw.bedrooms) != null && num(raw.bedrooms)! > 0) out.bedrooms = num(raw.bedrooms)
+  if (num(raw.bathrooms) != null && num(raw.bathrooms)! > 0) out.bathrooms = num(raw.bathrooms)
+  if (typeof raw.furnishing === 'string' && raw.furnishing.trim()) out.furnishing = raw.furnishing.trim()
+  if (typeof raw.availability === 'string' && raw.availability.trim()) out.availability = raw.availability.trim()
+  if (typeof raw.listingTitle === 'string' && raw.listingTitle.trim()) out.listingTitle = raw.listingTitle.trim()
   const c = raw.commuteMins
   if (c && typeof c === 'object') {
     const NUS = num(c.NUS), NTU = num(c.NTU), SMU = num(c.SMU)
@@ -154,6 +171,393 @@ function installPdfjsPolyfills() {
     }
   }
 }
+
+// PropertyGuru listing URL → structured fields, mirroring the poster schema.
+//
+// Approach: fetch the HTML server-side with a real browser User-Agent, strip
+// scripts/styles (but keep JSON-LD), trim to a token-safe size, and let Gemini
+// extract the same fields the poster path produces. We do NOT persist anything
+// here — the client uses the returned fields to prefill the Add Property form.
+//
+// Caveat: PropertyGuru sits behind Cloudflare. A plain server fetch works for
+// many listings but can be challenged. When that happens we return a clear
+// error so the operator falls back to manual entry.
+function isPropertyGuruUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return /(^|\.)propertyguru\.com\.sg$/i.test(u.hostname)
+  } catch {
+    return false
+  }
+}
+
+// Route the fetch through a residential-proxy service when an API key is set.
+// PropertyGuru's Cloudflare layer 403s our datacenter IP, so we need a real
+// IP to get the HTML. Set ONE of SCRAPER_API_KEY (scraperapi.com) or
+// SCRAPINGBEE_API_KEY (scrapingbee.com) in Convex env to enable. Without one,
+// we fall back to direct fetch and the action returns a 403 error for the
+// operator to see.
+async function proxiedFetch(targetUrl: string): Promise<{ status: number; html: string }> {
+  const scraperApi = process.env.SCRAPER_API_KEY
+  const scrapingBee = process.env.SCRAPINGBEE_API_KEY
+
+  let fetchUrl = targetUrl
+  let usingProxy: 'scraperapi' | 'scrapingbee' | null = null
+  // Opt-in: PG_RENDER_JS=1 asks the proxy to execute JS before returning
+  // HTML. This makes lazy-loaded gallery images appear in the rendered
+  // markup at the cost of ~10× more credits per request. Leave unset for
+  // listings where the JSON-state parsing already finds everything.
+  const renderJs = process.env.PG_RENDER_JS === '1' || process.env.PG_RENDER_JS === 'true'
+
+  if (scraperApi) {
+    fetchUrl =
+      `https://api.scraperapi.com/?api_key=${encodeURIComponent(scraperApi)}` +
+      `&url=${encodeURIComponent(targetUrl)}&country_code=sg` +
+      (renderJs ? '&render=true' : '')
+    usingProxy = 'scraperapi'
+  } else if (scrapingBee) {
+    fetchUrl =
+      `https://app.scrapingbee.com/api/v1/?api_key=${encodeURIComponent(scrapingBee)}` +
+      `&url=${encodeURIComponent(targetUrl)}&country_code=sg&premium_proxy=true` +
+      (renderJs ? '&render_js=true' : '&render_js=false')
+    usingProxy = 'scrapingbee'
+  }
+
+  const res = await fetch(fetchUrl, {
+    redirect: 'follow',
+    headers: usingProxy
+      ? { Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' }
+      : {
+          'User-Agent':
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-SG,en;q=0.9',
+          'Cache-Control': 'no-cache',
+        },
+  })
+  const html = await res.text()
+  return { status: res.status, html }
+}
+
+function looksBlocked(html: string, status: number): string | null {
+  if (status === 403 || status === 429) return `blocked (HTTP ${status})`
+  if (status >= 400) return `HTTP ${status}`
+  const head = html.slice(0, 4000).toLowerCase()
+  if (head.includes('just a moment') || head.includes('cf-chl') || head.includes('cloudflare')) {
+    if (head.includes('challenge') || head.includes('verifying you are human')) {
+      return 'Cloudflare challenge page'
+    }
+  }
+  return null
+}
+
+// Keep meta tags + JSON-LD (gold for extraction) and visible text; drop
+// scripts/styles/svg to shrink the payload Gemini sees.
+function distillHtml(html: string): string {
+  const ldJson: string[] = []
+  html.replace(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi, (_, body) => {
+    ldJson.push(body.trim())
+    return ''
+  })
+  const stripped = html
+    .replace(/<script[\s\S]*?<\/script>/gi, '')
+    .replace(/<style[\s\S]*?<\/style>/gi, '')
+    .replace(/<svg[\s\S]*?<\/svg>/gi, '')
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+  const metas: string[] = []
+  stripped.replace(/<meta[^>]+>/gi, (m) => { metas.push(m); return '' })
+  const titleMatch = stripped.match(/<title[^>]*>([\s\S]*?)<\/title>/i)
+  const bodyMatch = stripped.match(/<body[\s\S]*<\/body>/i)
+  const body = bodyMatch ? bodyMatch[0] : stripped
+  const text = body
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const parts = [
+    titleMatch ? `TITLE: ${titleMatch[1].trim()}` : '',
+    metas.length ? `META:\n${metas.join('\n')}` : '',
+    ldJson.length ? `JSON_LD:\n${ldJson.join('\n---\n')}` : '',
+    `BODY_TEXT:\n${text}`,
+  ].filter(Boolean)
+  const joined = parts.join('\n\n')
+  return joined.length > 60_000 ? joined.slice(0, 60_000) : joined
+}
+
+// Pull every plausible listing image URL out of the HTML. PG renders the hero
+// in og:image and the full gallery in JSON-LD; we union both and dedupe.
+// Conservative — every URL must end in an image extension. Anything broader
+// ended up sweeping listing links and breaking the download step.
+function extractImageUrls(html: string): string[] {
+  const urls = new Set<string>()
+  // JSON-unescape so URLs inside script blobs (`\/`) are reachable.
+  const unescaped = html.replace(/\\\//g, '/')
+  const add = (raw: any) => {
+    if (typeof raw !== 'string') return
+    const u = raw.trim().replace(/\\\//g, '/')
+    if (!u) return
+    if (!/^https?:\/\//i.test(u)) return
+    if (!/\.(?:jpg|jpeg|png|webp)(?:\?|$|#)/i.test(u)) return
+    if (/avatar|placeholder|sprite|favicon|logo|icon[-_]/i.test(u)) return
+    urls.add(u)
+  }
+  // og:image / twitter:image — both attribute orders.
+  for (const m of unescaped.matchAll(
+    /<meta[^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["'][^>]*content=["']([^"']+)["']/gi,
+  )) add(m[1])
+  for (const m of unescaped.matchAll(
+    /<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["'](?:og:image|og:image:secure_url|twitter:image)["']/gi,
+  )) add(m[1])
+  // JSON-LD image fields (string | string[] | {url}[]).
+  const walk = (data: any) => {
+    if (!data) return
+    if (Array.isArray(data)) { data.forEach(walk); return }
+    if (typeof data !== 'object') return
+    if ('image' in data) {
+      const img = (data as any).image
+      if (typeof img === 'string') add(img)
+      else if (Array.isArray(img)) for (const i of img) {
+        if (typeof i === 'string') add(i)
+        else if (i && typeof i === 'object') add((i as any).url || (i as any).contentUrl)
+      }
+      else if (img && typeof img === 'object') add(img.url || img.contentUrl)
+    }
+    for (const k in data) walk((data as any)[k])
+  }
+  for (const m of html.matchAll(
+    /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi,
+  )) {
+    try { walk(JSON.parse(m[1])) } catch { /* skip malformed */ }
+  }
+  // Sweep the unescaped HTML for any image URL on a known PG CDN.
+  for (const m of unescaped.matchAll(
+    /https?:\/\/[^\s"'<>\\]+\.(?:jpg|jpeg|png|webp)(?:\?[^\s"'<>\\]*)?/gi,
+  )) {
+    const u = m[0]
+    if (/(pgimgs|propertyguru|guruimages|sg-prdcms|sg\.production\.urbanc|cloudfront)/i.test(u)) {
+      add(u)
+    }
+  }
+  return Array.from(urls).slice(0, 20)
+}
+
+// PropertyGuru listings link back to the development's project page, which
+// has the official facilities + nearby amenities list. Pull the first
+// `/project/<slug>` URL we see in the HTML so the client can ask us to scrape
+// it for verified facilities (see fetchProjectPageText below).
+function extractProjectUrl(html: string): string | undefined {
+  const unescaped = html.replace(/\\\//g, '/')
+  const m = unescaped.match(/https?:\/\/(?:www\.)?propertyguru\.com\.sg\/project\/[a-z0-9-]+/i)
+  if (m) return m[0]
+  // Sometimes only the relative path is in the HTML.
+  const rel = unescaped.match(/\/project\/[a-z0-9-]+/i)
+  if (rel) return `https://www.propertyguru.com.sg${rel[0]}`
+  return undefined
+}
+
+async function extractUrlWithGemini(distilled: string): Promise<{
+  fields: Record<string, unknown>
+  suggestedCondo?: string
+  note?: string
+}> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) return { fields: {}, note: 'GEMINI_API_KEY not set' }
+  const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL
+  const ai = new GoogleGenAI({ apiKey })
+
+  const SYSTEM = `You read the distilled HTML of a PropertyGuru Singapore listing page and extract structured facts.
+
+Return ONLY a JSON object — no prose, no markdown fences. Use these exact keys; omit any key you cannot confidently determine from the page content. Do not invent values.
+
+{
+  "condo": string,                         // development / building name, e.g. "Normanton Park"
+  "rentSGD": number,                       // monthly rent in S$, integer
+  "area": string,                          // neighbourhood / district, e.g. "Kent Ridge"
+  "buildingType": "Condo" | "HDB",
+  "housingType": "Room" | "Whole Unit",    // "Room" if it's a single room rental, otherwise "Whole Unit"
+  "ageYears": number,                      // building age in years if visible
+  "unitType": "Common Room" | "Master Room" | "Studio" | "Whole Unit",
+  "fullAddress": string,                   // full street address if shown
+  "sizeSqft": number,                      // floor area in square feet, integer (just the number)
+  "bedrooms": number,                      // number of bedrooms in the unit
+  "bathrooms": number,                     // number of bathrooms in the unit
+  "furnishing": string,                    // e.g. "Fully furnished", "Partially furnished", "Unfurnished"
+  "availability": string,                  // when the unit is available, e.g. "Ready to move in", "1 Jul 2026"
+  "listingTitle": string                   // the listing's headline as written, e.g. "1 Bedroom Studio (Type A2) — high floor, balcony"
+}
+
+Strip "S$", "$", commas from numeric values. If the listing says "Studio" use unitType "Studio" and housingType "Whole Unit". If unsure between Condo and HDB, omit buildingType. For sizeSqft, prefer the value shown in the property details table over anything in the description.`
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [{ text: `Extract the structured facts from this listing.\n\n${distilled}` }],
+        },
+      ],
+      config: {
+        systemInstruction: SYSTEM,
+        temperature: 0.0,
+        responseMimeType: 'application/json',
+        thinkingConfig: { thinkingBudget: 0 },
+        maxOutputTokens: 2048,
+      },
+    })
+    const text = (response.text || '').trim()
+    let parsed: any
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      const fenced = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/i)
+      if (fenced) parsed = JSON.parse(fenced[1])
+      else throw new Error(`non-JSON response: ${text.slice(0, 300)}`)
+    }
+    const fields = sanitiseGeminiFields(parsed)
+    const suggestedCondo =
+      typeof parsed?.condo === 'string' && parsed.condo.trim() ? parsed.condo.trim() : undefined
+    const note = `raw=${text.slice(0, 500)} | keys=${Object.keys(fields).join(',') || '(none)'}`
+    return { fields, suggestedCondo, note }
+  } catch (err: any) {
+    return { fields: {}, note: `Gemini extraction failed: ${err?.message || err}` }
+  }
+}
+
+export const extractPropertyGuruUrl = action({
+  args: { url: v.string() },
+  handler: async (_ctx, { url }) => {
+    if (!isPropertyGuruUrl(url)) {
+      return {
+        ok: false,
+        fields: {},
+        suggestedCondo: undefined as string | undefined,
+        error: 'URL must be on propertyguru.com.sg',
+      }
+    }
+
+    let html = ''
+    let status = 0
+    try {
+      const res = await proxiedFetch(url)
+      status = res.status
+      html = res.html
+    } catch (err: any) {
+      return {
+        ok: false,
+        fields: {},
+        suggestedCondo: undefined as string | undefined,
+        error: `Fetch failed: ${err?.message || err}`,
+      }
+    }
+
+    const blocked = looksBlocked(html, status)
+    if (blocked) {
+      const hasProxy = !!(process.env.SCRAPER_API_KEY || process.env.SCRAPINGBEE_API_KEY)
+      const hint = hasProxy
+        ? 'The proxy returned a block. Some listings need premium proxy / JS rendering — enable those flags or try a different listing.'
+        : 'Set SCRAPER_API_KEY or SCRAPINGBEE_API_KEY in Convex env to route through a residential proxy.'
+      return {
+        ok: false,
+        fields: {},
+        suggestedCondo: undefined as string | undefined,
+        error: `PropertyGuru ${blocked}. ${hint}`,
+      }
+    }
+
+    const distilled = distillHtml(html)
+    const imageUrls = extractImageUrls(html)
+    const projectUrl = extractProjectUrl(html)
+    const { fields, suggestedCondo, note } = await extractUrlWithGemini(distilled)
+    return {
+      ok: Object.keys(fields).length > 0 || !!suggestedCondo || imageUrls.length > 0,
+      fields,
+      suggestedCondo,
+      imageUrls,
+      projectUrl,
+      note,
+    }
+  },
+})
+
+// Fetch + distill a PropertyGuru project page (the development-level URL
+// like `propertyguru.com.sg/project/<slug>`). The project page carries the
+// official facilities list + nearby amenities that listing pages do not.
+// The poster generator calls this to ground Gemini in real data so it does
+// not fabricate facilities for unknown condos.
+export const fetchProjectPageText = action({
+  args: { url: v.string() },
+  handler: async (_ctx, { url }) => {
+    if (!isPropertyGuruUrl(url)) {
+      return { ok: false as const, text: '', note: 'Not a PropertyGuru URL' }
+    }
+    try {
+      const res = await proxiedFetch(url)
+      const blocked = looksBlocked(res.html, res.status)
+      if (blocked) {
+        return { ok: false as const, text: '', note: `Project page ${blocked}` }
+      }
+      return { ok: true as const, text: distillHtml(res.html), note: 'ok' }
+    } catch (err: any) {
+      return { ok: false as const, text: '', note: err?.message || String(err) }
+    }
+  },
+})
+
+// Fetch remote image URLs server-side (PG images aren't CORS-friendly from
+// the browser) and return their bytes as base64 so the client can wrap each
+// in a File and add it to the same images array as user uploads. From there
+// the existing save flow uploads them to Convex storage and the poster prompt
+// generator picks them up automatically — no parallel image pipeline needed.
+//
+// Cap at 8 images / ~6MB total: Convex action responses are bounded and PG
+// hero images are already ~150-300KB each. Failed URLs are reported in
+// `skipped` rather than aborting the whole batch.
+export const fetchImagesAsData = action({
+  args: { urls: v.array(v.string()) },
+  handler: async (_ctx, { urls }) => {
+    const images: Array<{ name: string; contentType: string; size: number; dataB64: string }> = []
+    const skipped: Array<{ url: string; reason: string }> = []
+    let totalBytes = 0
+    const BYTE_BUDGET = 10 * 1024 * 1024
+    for (const url of urls.slice(0, 12)) {
+      try {
+        const res = await fetch(url, {
+          redirect: 'follow',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+            Accept: 'image/avif,image/webp,image/*,*/*;q=0.8',
+            Referer: 'https://www.propertyguru.com.sg/',
+          },
+        })
+        if (!res.ok) {
+          skipped.push({ url, reason: `HTTP ${res.status}` })
+          continue
+        }
+        const buf = new Uint8Array(await res.arrayBuffer())
+        if (buf.length === 0) { skipped.push({ url, reason: 'empty body' }); continue }
+        if (totalBytes + buf.length > BYTE_BUDGET) { skipped.push({ url, reason: 'byte budget exceeded' }); continue }
+        totalBytes += buf.length
+        let bin = ''
+        for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
+        const dataB64 = btoa(bin)
+        const contentType = res.headers.get('content-type') || 'image/jpeg'
+        let name = 'pg-image.jpg'
+        try {
+          const parsed = new URL(url)
+          const seg = parsed.pathname.split('/').pop() || ''
+          if (seg && /\.(jpg|jpeg|png|webp)$/i.test(seg)) name = seg
+        } catch { /* ignore */ }
+        images.push({ name, contentType, size: buf.length, dataB64 })
+      } catch (err: any) {
+        skipped.push({ url, reason: err?.message || 'fetch failed' })
+      }
+    }
+    return { images, skipped }
+  },
+})
 
 export const extractPosterDetails = action({
   args: { id: v.id('properties') },
