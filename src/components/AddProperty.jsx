@@ -38,7 +38,9 @@ export default function AddProperty({ toast, onSaved, draft }) {
   const [pgUrl, setPgUrl] = React.useState('')
   const [extracting, setExtracting] = React.useState(false)
   const [generatingPoster, setGeneratingPoster] = React.useState(false)
-  const [primaryUni, setPrimaryUni] = React.useState('NUS')
+  // null = auto-highlight the campus with the lowest commute time.
+  // The manual chips below still allow operator override.
+  const [primaryUni, setPrimaryUni] = React.useState(null)
   const imagesRef = React.useRef(null)
   const posterRef = React.useRef(null)
 
@@ -140,7 +142,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
         property: propertyArg,
         images: inline,
         projectUrl: projectUrl || undefined,
-        primaryUni,
+        ...(primaryUni ? { primaryUni } : {}),
       })
       console.log('[poster] gemini response', res)
       if (!res?.ok || !res.content) {
@@ -605,20 +607,6 @@ export default function AddProperty({ toast, onSaved, draft }) {
                 View poster ↗
               </a>
             )}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-              <span style={{ color: 'var(--ink-soft)' }}>Primary uni</span>
-              {['NUS', 'NTU', 'SMU'].map((uni) => (
-                <button
-                  key={uni}
-                  type="button"
-                  onClick={() => setPrimaryUni(uni)}
-                  className={primaryUni === uni ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm'}
-                  style={{ minWidth: 48 }}
-                >
-                  {uni}
-                </button>
-              ))}
-            </div>
           </div>
           {!canGeneratePoster && !generatingPoster && (
             <div

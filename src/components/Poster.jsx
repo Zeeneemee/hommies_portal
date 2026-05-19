@@ -294,9 +294,21 @@ function CommuteTable({ property, content, primaryUni }) {
   const cm = content?.commute || {}
   const origin = property.fullAddress || property.condo
 
+  // Auto-highlight the campus with the lowest commute time. The primaryUni
+  // prop is kept as an explicit override; if it's falsy we pick the min.
+  const minsFor = (uni) => {
+    const d = cm[uni] || {}
+    const n = Number(d.minutes ?? d.total)
+    return Number.isFinite(n) ? n : Infinity
+  }
+  const autoPrimary = ['NUS', 'NTU', 'SMU'].reduce((best, uni) =>
+    minsFor(uni) < minsFor(best) ? uni : best,
+  )
+  const effectivePrimary = primaryUni || autoPrimary
+
   const rows = ['NUS', 'NTU', 'SMU'].map((uni) => {
     const data = cm[uni] || {}
-    const isPrimary = primaryUni === uni
+    const isPrimary = effectivePrimary === uni
     return {
       uni,
       isPrimary,
