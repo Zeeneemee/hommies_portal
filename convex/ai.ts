@@ -27,6 +27,7 @@ import { action } from './_generated/server'
 import { api } from './_generated/api'
 import { v } from 'convex/values'
 import { GoogleGenAI } from '@google/genai'
+import { parseGeminiJson } from './extraction'
 
 // The deployment's GEMINI_MODEL env var overrides this — useful when free-tier
 // availability for one model vanishes (e.g. gemini-2.0-flash is `limit: 0` in
@@ -354,17 +355,12 @@ export const generatePosterContent = action({
       const text = (response.text || '').trim()
       let parsed: any
       try {
-        parsed = JSON.parse(text)
-      } catch {
-        const fenced = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/i)
-        if (fenced) {
-          parsed = JSON.parse(fenced[1])
-        } else {
-          return {
-            ok: false as const,
-            content: null,
-            note: `Gemini returned non-JSON: ${text.slice(0, 300)}`,
-          }
+        parsed = parseGeminiJson(text, response?.candidates?.[0]?.finishReason)
+      } catch (err: any) {
+        return {
+          ok: false as const,
+          content: null,
+          note: `Gemini returned non-JSON: ${err?.message || err}`,
         }
       }
       const idxOrNull = (raw: any) => {

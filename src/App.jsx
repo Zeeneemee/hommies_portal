@@ -34,6 +34,9 @@ function useAddPropertyDraft() {
   })
   const [images, setImages] = React.useState([])
   const [posterFile, setPosterFile] = React.useState(null)
+  // Optional walk-through video. In-memory only, like posterFile — File blobs
+  // can't be serialized, so a refresh drops it.
+  const [videoFile, setVideoFile] = React.useState(null)
   // Fields lifted from a pasted PropertyGuru link — passed through to
   // properties:add on save. In-memory only; not persisted across reloads.
   const [extracted, setExtracted] = React.useState(null)
@@ -54,6 +57,7 @@ function useAddPropertyDraft() {
     })
     setCondo('')
     setPosterFile(null)
+    setVideoFile(null)
     setExtracted(null)
     setProjectUrl(null)
     try { window.localStorage.removeItem(DRAFT_CONDO_KEY) } catch {}
@@ -62,6 +66,7 @@ function useAddPropertyDraft() {
     condo, setCondo,
     images, setImages,
     posterFile, setPosterFile,
+    videoFile, setVideoFile,
     extracted, setExtracted,
     projectUrl, setProjectUrl,
     reset,

@@ -131,6 +131,35 @@ export const Icon = ({ name, size = 16, stroke = 1.6, ...rest }) => {
           <line x1="3" y1="18" x2="21" y2="18" />
         </svg>
       )
+    case 'play':
+      return (
+        <svg {...common}>
+          <polygon points="5 3 19 12 5 21 5 3" fill="currentColor" stroke="currentColor" />
+        </svg>
+      )
+    case 'video':
+      return (
+        <svg {...common}>
+          <rect x="2" y="6" width="14" height="12" rx="2" />
+          <polygon points="22 8 16 12 22 16 22 8" />
+        </svg>
+      )
+    case 'download':
+      return (
+        <svg {...common}>
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+      )
+    case 'external':
+      return (
+        <svg {...common}>
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+          <polyline points="15 3 21 3 21 9" />
+          <line x1="10" y1="14" x2="21" y2="3" />
+        </svg>
+      )
     default:
       return null
   }

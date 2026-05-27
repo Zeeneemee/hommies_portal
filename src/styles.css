@@ -967,6 +967,9 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   object-fit: cover;
   display: block;
 }
+video.listing-hero-img {
+  background: #000; /* letterbox bars look intentional when aspect mismatches */
+}
 .listing-hero-placeholder {
   width: 100%;
   height: 160px;
@@ -990,6 +993,94 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   flex-shrink: 0;
   border: 1px solid var(--hairline);
 }
+/* Media action overlay — sits on top of an image (hero or thumb) with
+ * Open / Download icon buttons. Visible on hover and on touch (always
+ * visible on coarse pointers). Click handlers stop propagation so they
+ * don't fire any card-level surface. */
+.media-actions {
+  position: absolute;
+  inset: auto 6px 6px auto;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+  pointer-events: none;
+}
+.listing-hero-wrap:hover .media-actions,
+.listing-thumb-wrap:hover .media-actions,
+.media-actions:focus-within {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (pointer: coarse) {
+  .media-actions { opacity: 1; pointer-events: auto; }
+}
+.media-action {
+  display: inline-grid;
+  place-items: center;
+  width: 26px; height: 26px;
+  border-radius: 6px;
+  background: rgba(4, 31, 96, 0.78);
+  color: #fff;
+  border: none;
+  text-decoration: none;
+  cursor: pointer;
+  padding: 0;
+}
+.media-action:hover { background: var(--navy); }
+.listing-hero-wrap, .listing-thumb-wrap { position: relative; display: inline-block; }
+.listing-thumb-wrap { line-height: 0; }
+
+/* Video tile shown on the Listings card — either with the video present
+ * (filename + Open/Download), or as a muted "No video" placeholder. */
+.listing-video {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--hairline);
+  font-size: 12px;
+}
+.listing-video .icon-wrap {
+  display: grid;
+  place-items: center;
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: var(--cream);
+  color: var(--navy);
+  flex-shrink: 0;
+}
+.listing-video.muted { color: var(--ink-mute); }
+.listing-video.muted .icon-wrap { background: var(--cream-2); color: var(--ink-mute); }
+.listing-video .name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  color: var(--ink);
+}
+.listing-video .actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.listing-video .action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--navy);
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  cursor: pointer;
+}
+.listing-video .action:hover { background: var(--cream); }
+
 .listing-poster-link {
   display: inline-flex;
   align-items: center;

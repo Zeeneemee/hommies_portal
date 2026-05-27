@@ -15,6 +15,8 @@ import { resizeImageToJpeg, blobToBase64 } from '../poster/encode.js'
 // extraction runs on the very first save.
 
 const IMAGE_CAP = 12
+const VIDEO_MAX_BYTES = 200 * 1024 * 1024
+const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
 
 export default function AddProperty({ toast, onSaved, draft }) {
   const addProperty = useMutation('properties:add')
@@ -31,6 +33,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
     condo, setCondo,
     images, setImages,
     posterFile, setPosterFile,
+    videoFile, setVideoFile,
     extracted, setExtracted,
     projectUrl, setProjectUrl,
   } = draft
@@ -43,6 +46,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
   const [primaryUni, setPrimaryUni] = React.useState(null)
   const imagesRef = React.useRef(null)
   const posterRef = React.useRef(null)
+  const videoRef = React.useRef(null)
 
   // Object URL kept in sync with posterFile so we can offer a "View" link
   // (and any future inline preview). Revoked on change to avoid leaking.
@@ -56,6 +60,17 @@ export default function AddProperty({ toast, onSaved, draft }) {
     setPosterPreviewUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [posterFile])
+
+  const [videoPreviewUrl, setVideoPreviewUrl] = React.useState(null)
+  React.useEffect(() => {
+    if (!videoFile) {
+      setVideoPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(videoFile)
+    setVideoPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [videoFile])
 
   // What we still need before we can call Gemini. The button stays clickable
   // either way; the handler turns the missing list into a clear toast and the
@@ -306,6 +321,27 @@ export default function AddProperty({ toast, onSaved, draft }) {
     setPosterFile(file)
   }
 
+  function handleVideoPicked(file) {
+    if (!file) {
+      setVideoFile(null)
+      return
+    }
+    const lower = file.name.toLowerCase()
+    const isAllowedMime = VIDEO_MIME_TYPES.includes(file.type)
+    const isAllowedExt = ['.mp4', '.mov', '.webm'].some((ext) => lower.endsWith(ext))
+    if (!isAllowedMime && !isAllowedExt) {
+      toast('Video must be an MP4, MOV, or WebM file.')
+      if (videoRef.current) videoRef.current.value = ''
+      return
+    }
+    if (file.size > VIDEO_MAX_BYTES) {
+      toast(`Video is ${(file.size / 1024 / 1024).toFixed(0)} MB — keep it under 200 MB.`)
+      if (videoRef.current) videoRef.current.value = ''
+      return
+    }
+    setVideoFile(file)
+  }
+
   async function uploadBlob(file) {
     const uploadUrl = await generateUploadUrl()
     const res = await fetch(uploadUrl, {
@@ -324,8 +360,8 @@ export default function AddProperty({ toast, onSaved, draft }) {
       toast('Name the property to add.')
       return
     }
-    if (images.length === 0) {
-      toast('Attach at least one image to add.')
+    if (images.length === 0 && !videoFile) {
+      toast('Attach at least one image or a walk-through video.')
       return
     }
     setSaving(true)
@@ -337,7 +373,20 @@ export default function AddProperty({ toast, onSaved, draft }) {
         uploadedImages.push({ storageId, name: img.name, size: img.size, contentType: img.contentType })
       }
 
-      // 2. Optionally upload the poster.
+      // 2. Optionally upload the walk-through video (reference-only, never
+      // referenced by the poster or extraction).
+      let videoStorageId
+      let videoName
+      let videoSize
+      let videoContentType
+      if (videoFile) {
+        videoStorageId = await uploadBlob(videoFile)
+        videoName = videoFile.name
+        videoSize = videoFile.size
+        videoContentType = videoFile.type || undefined
+      }
+
+      // 3. Optionally upload the poster.
       let posterStorageId
       let posterName
       let posterSize
@@ -347,7 +396,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
         posterSize = posterFile.size
       }
 
-      // 3. Create the property record. Only the schema-accepted extracted
+      // 4. Create the property record. Only the schema-accepted extracted
       // fields are spread; the URL extractor lifts more (sizeSqft, furnishing,
       // availability, etc.) but properties:add doesn't accept those yet —
       // they're poster-only for now.
@@ -363,10 +412,14 @@ export default function AddProperty({ toast, onSaved, draft }) {
         posterStorageId,
         posterName,
         posterSize,
+        videoStorageId,
+        videoName,
+        videoSize,
+        videoContentType,
         ...savable,
       })
 
-      // 4. If a poster was attached, kick off extraction — it patches the
+      // 5. If a poster was attached, kick off extraction — it patches the
       // property with whatever it can lift from the PDF text.
       if (posterStorageId) {
         try {
@@ -383,11 +436,12 @@ export default function AddProperty({ toast, onSaved, draft }) {
         toast(`${condo} added — make the poster in /room-showcase-pdf and attach it on Status.`)
       }
 
-      // 5. Reset and route to Status. draft.reset() revokes preview URLs,
+      // 6. Reset and route to Status. draft.reset() revokes preview URLs,
       // clears the in-memory File state, and removes the localStorage condo.
       draft.reset()
       if (imagesRef.current) imagesRef.current.value = ''
       if (posterRef.current) posterRef.current.value = ''
+      if (videoRef.current) videoRef.current.value = ''
       onSaved?.()
     } catch (err) {
       toast(`Save failed: ${err.message || err}`)
@@ -494,7 +548,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
       <div className="card" style={{ marginBottom: 18 }}>
         <div className="card-head">
           <h3 className="card-title">Property</h3>
-          <p className="card-sub">A name and at least one photo — that's the whole intake.</p>
+          <p className="card-sub">A name plus at least one photo or a walk-through video — that's the whole intake.</p>
         </div>
         <div className="card-pad">
           <div className="form-grid">
@@ -511,7 +565,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
           <div style={{ marginTop: 6 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>
-                Images <span style={{ color: 'var(--orange)' }}>*</span>
+                Images <span style={{ color: 'var(--ink-mute)', fontWeight: 400 }}>(optional if a video is attached)</span>
               </div>
               <div className="field-hint">
                 {images.length} of {IMAGE_CAP} attached
@@ -555,6 +609,69 @@ export default function AddProperty({ toast, onSaved, draft }) {
               onChange={(e) => handleImagesPicked(e.target.files)}
             />
           </div>
+        </div>
+      </div>
+
+<div className="card" style={{ marginBottom: 18 }}>
+        <div className="card-head">
+          <h3 className="card-title">Walk-through video (optional)</h3>
+          <p className="card-sub">
+            Reference-only — the video is not used in the poster. Stored alongside the listing so the
+            team can re-watch the unit later. MP4 / MOV / WebM up to 200 MB.
+          </p>
+        </div>
+        <div className="card-pad">
+          <label className={`upload ${videoFile ? 'has-file' : ''}`}>
+            <input
+              ref={videoRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+              style={{ display: 'none' }}
+              onChange={(e) => handleVideoPicked(e.target.files?.[0])}
+            />
+            <div className="upload-icon">
+              <Icon name={videoFile ? 'play' : 'upload'} size={20} />
+            </div>
+            <div className="upload-text" style={{ flex: 1 }}>
+              {videoFile ? (
+                <>
+                  <strong>{videoFile.name}</strong>
+                  <span>{(videoFile.size / 1024 / 1024).toFixed(1)} MB · ready to upload on save.</span>
+                </>
+              ) : (
+                <>
+                  <strong>Click to attach a walk-through video</strong>
+                  <span>Or skip — videos are optional. Add or replace later from Listings.</span>
+                </>
+              )}
+            </div>
+            {videoFile && (
+              <div style={{ display: 'flex', gap: 6 }}>
+                {videoPreviewUrl && (
+                  <a
+                    href={videoPreviewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="btn btn-ghost btn-sm"
+                    onClick={(e) => e.stopPropagation()}
+                    title="Open this video in a new tab"
+                  >
+                    View
+                  </a>
+                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    handleVideoPicked(null)
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            )}
+          </label>
         </div>
       </div>
 

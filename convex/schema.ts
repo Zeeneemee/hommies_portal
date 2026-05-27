@@ -59,6 +59,16 @@ export default defineSchema({
     posterExtractionRaw: v.optional(v.string()),
     posterExtractionOk: v.optional(v.boolean()),
 
+    // Optional walk-through video for internal reference + the Listings card.
+    // Reference-only: not used by the poster generator, the extraction
+    // pipeline, or the recommend engine. One video per property — replace by
+    // calling properties:setVideo, which deletes the previous blob.
+    videoStorageId: v.optional(v.id('_storage')),
+    videoName: v.optional(v.string()),
+    videoSize: v.optional(v.number()),
+    videoContentType: v.optional(v.string()),
+    videoAddedAt: v.optional(v.number()),
+
     status: v.union(
       v.literal('data_received'),
       v.literal('poster_attached'),

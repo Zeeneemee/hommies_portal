@@ -120,7 +120,7 @@ function ListingEditController({ property, onClose, toast }) {
       toast?.(`Update failed: ${err.message || err}`)
     }
   }
-  return <ListingEditModal property={property} onClose={onClose} onSave={handleSave} />
+  return <ListingEditModal property={property} onClose={onClose} onSave={handleSave} toast={toast} />
 }
 
 function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) {
@@ -159,7 +159,11 @@ function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) 
   }
 
   async function handleDelete() {
-    if (!window.confirm(`Delete "${p.condo}"? This removes the property and its poster from storage.`)) {
+    if (
+      !window.confirm(
+        `Delete "${p.condo}"? This removes the property, its poster, and its video from storage.`,
+      )
+    ) {
       return
     }
     setBusy(true)
@@ -173,15 +177,34 @@ function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) 
     // No setBusy(false) on success — the card is about to unmount.
   }
 
+  // Hero priority: first image → walk-through video (first frame as poster)
+  // → "No media yet" placeholder. The video-as-hero path lets a property
+  // saved with just a name + video still look like a real card.
+  const heroVideo = !hero?.url && p.videoUrl ? { url: p.videoUrl, name: p.videoName } : null
+
   return (
     <div key={p._id} className="listing">
-      {/* Hero — first uploaded image, or placeholder — with badges overlaid. */}
-      <div style={{ position: 'relative' }}>
+      {/* Hero — first uploaded image, or video, or placeholder — with badges overlaid. */}
+      <div className="listing-hero-wrap" style={{ position: 'relative' }}>
         {hero?.url ? (
-          <img className="listing-hero-img" src={hero.url} alt={hero.name} />
+          <>
+            <img className="listing-hero-img" src={hero.url} alt={hero.name} />
+            <MediaActions url={hero.url} name={hero.name} />
+          </>
+        ) : heroVideo ? (
+          <>
+            <video
+              className="listing-hero-img"
+              src={heroVideo.url}
+              controls
+              preload="metadata"
+              playsInline
+            />
+            <MediaActions url={heroVideo.url} name={heroVideo.name} />
+          </>
         ) : (
           <div className="listing-hero-placeholder">
-            <Icon name="photo" size={28} /> &nbsp;No photos yet
+            <Icon name="photo" size={28} /> &nbsp;No media yet
           </div>
         )}
         <div
@@ -241,7 +264,10 @@ function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) 
       {rest.length > 0 && (
         <div className="listing-thumbs">
           {rest.map((img) => (
-            <img key={img.storageId} src={img.url} alt={img.name} className="listing-thumb" />
+            <span key={img.storageId} className="listing-thumb-wrap">
+              <img src={img.url} alt={img.name} className="listing-thumb" />
+              <MediaActions url={img.url} name={img.name} />
+            </span>
           ))}
           {images.length > 5 && (
             <div className="listing-thumb" style={{ display: 'grid', placeItems: 'center', fontSize: 11, color: 'var(--ink-soft)', fontWeight: 600 }}>
@@ -250,6 +276,12 @@ function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) 
           )}
         </div>
       )}
+
+      {/* Video slot — only when the video isn't already shown as the hero.
+          Always rendered otherwise (including the muted "No video" state) so
+          the absence is visible. */}
+      {!heroVideo && <VideoSlot videoUrl={p.videoUrl} name={p.videoName} />}
+
 
       <div className="listing-body">
         <div className="listing-name">{p.condo}</div>
@@ -303,6 +335,72 @@ function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) 
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+function MediaActions({ url, name }) {
+  if (!url) return null
+  const stop = (e) => e.stopPropagation()
+  return (
+    <div className="media-actions" onClick={stop}>
+      <a
+        className="media-action"
+        href={url}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={stop}
+        title="Open in new tab"
+        aria-label={`Open ${name || 'media'} in new tab`}
+      >
+        <Icon name="external" size={13} />
+      </a>
+      <a
+        className="media-action"
+        href={url}
+        download={name || ''}
+        onClick={stop}
+        title="Download"
+        aria-label={`Download ${name || 'media'}`}
+      >
+        <Icon name="download" size={13} />
+      </a>
+    </div>
+  )
+}
+
+function VideoSlot({ videoUrl, name }) {
+  if (!videoUrl) {
+    return (
+      <div className="listing-video muted">
+        <span className="icon-wrap"><Icon name="video" size={14} /></span>
+        <span className="name">No video</span>
+      </div>
+    )
+  }
+  return (
+    <div className="listing-video">
+      <span className="icon-wrap"><Icon name="play" size={14} /></span>
+      <span className="name" title={name || ''}>{name || 'Walk-through video'}</span>
+      <span className="actions">
+        <a
+          className="action"
+          href={videoUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          title="Open video in new tab"
+        >
+          <Icon name="external" size={11} /> Open
+        </a>
+        <a
+          className="action"
+          href={videoUrl}
+          download={name || ''}
+          title="Download video"
+        >
+          <Icon name="download" size={11} /> Download
+        </a>
+      </span>
     </div>
   )
 }

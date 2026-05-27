@@ -1,12 +1,77 @@
 import React from 'react'
+import { useMutation } from 'convex/react'
 import { Icon, Field, Segment } from './ui.jsx'
 
-// Edit modal for a single property. Edits go through properties:update,
-// which strips undefined keys before patching — so blank inputs leave the
-// stored value alone rather than wiping it. Status changes happen elsewhere
-// (the per-card Advance/Reopen button → properties:advanceStatus), so this
-// modal only edits the descriptive fields lifted from the poster.
-export default function ListingEditModal({ property, onClose, onSave }) {
+const VIDEO_MAX_BYTES = 200 * 1024 * 1024
+const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
+
+// Edit modal for a single property. Descriptive fields go through
+// properties:update, which strips undefined keys before patching. Video
+// changes go through properties:setVideo — the canonical replace/clear
+// path that also cleans up the previously stored blob.
+export default function ListingEditModal({ property, onClose, onSave, toast }) {
+  const generateUploadUrl = useMutation('properties:generateUploadUrl')
+  const setVideo = useMutation('properties:setVideo')
+  // Video state — three possible pending intents:
+  //   { kind: 'keep' }    — leave the stored video as-is
+  //   { kind: 'replace', file: File }
+  //   { kind: 'clear' }   — clear the stored video on save
+  const [videoIntent, setVideoIntent] = React.useState({ kind: 'keep' })
+  const videoRef = React.useRef(null)
+  const [pendingPreviewUrl, setPendingPreviewUrl] = React.useState(null)
+  React.useEffect(() => {
+    if (videoIntent.kind !== 'replace') {
+      setPendingPreviewUrl(null)
+      return
+    }
+    const url = URL.createObjectURL(videoIntent.file)
+    setPendingPreviewUrl(url)
+    return () => URL.revokeObjectURL(url)
+  }, [videoIntent])
+
+  function handleVideoPicked(file) {
+    if (!file) return
+    const lower = file.name.toLowerCase()
+    const isAllowedMime = VIDEO_MIME_TYPES.includes(file.type)
+    const isAllowedExt = ['.mp4', '.mov', '.webm'].some((ext) => lower.endsWith(ext))
+    if (!isAllowedMime && !isAllowedExt) {
+      toast?.('Video must be an MP4, MOV, or WebM file.')
+      if (videoRef.current) videoRef.current.value = ''
+      return
+    }
+    if (file.size > VIDEO_MAX_BYTES) {
+      toast?.(`Video is ${(file.size / 1024 / 1024).toFixed(0)} MB — keep it under 200 MB.`)
+      if (videoRef.current) videoRef.current.value = ''
+      return
+    }
+    setVideoIntent({ kind: 'replace', file })
+  }
+
+  async function commitVideoIntent() {
+    if (videoIntent.kind === 'keep') return
+    if (videoIntent.kind === 'clear') {
+      await setVideo({ id: property._id, storageId: null })
+      return
+    }
+    // replace
+    const file = videoIntent.file
+    const uploadUrl = await generateUploadUrl()
+    const res = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    })
+    if (!res.ok) throw new Error(`video upload failed (${res.status})`)
+    const { storageId } = await res.json()
+    await setVideo({
+      id: property._id,
+      storageId,
+      name: file.name,
+      size: file.size,
+      contentType: file.type || undefined,
+    })
+  }
+
   const [f, setF] = React.useState({
     condo: property.condo || '',
     rentSGD: property.rentSGD ?? '',
@@ -31,7 +96,8 @@ export default function ListingEditModal({ property, onClose, onSave }) {
     return t.length ? t : undefined
   }
 
-  function handleSubmit(e) {
+  const [busy, setBusy] = React.useState(false)
+  async function handleSubmit(e) {
     e.preventDefault()
     if (!f.condo.trim()) return
     const patch = {
@@ -52,7 +118,16 @@ export default function ListingEditModal({ property, onClose, onSave }) {
     if (nus != null && ntu != null && smu != null) {
       patch.commuteMins = { NUS: nus, NTU: ntu, SMU: smu }
     }
-    onSave(patch)
+    setBusy(true)
+    try {
+      // Run video change first so a failure surfaces before the descriptive
+      // patch goes through — keeps the row + storage consistent.
+      await commitVideoIntent()
+      onSave(patch)
+    } catch (err) {
+      toast?.(`Video update failed: ${err.message || err}`)
+      setBusy(false)
+    }
   }
 
   return (
@@ -193,16 +268,131 @@ export default function ListingEditModal({ property, onClose, onSave }) {
             </Field>
           </div>
 
+          <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--hairline)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 8 }}>
+              Walk-through video (optional)
+            </div>
+            <VideoEditor
+              currentName={property.videoName}
+              currentSize={property.videoSize}
+              currentUrl={property.videoUrl}
+              intent={videoIntent}
+              pendingPreviewUrl={pendingPreviewUrl}
+              onPick={() => videoRef.current?.click()}
+              onClear={() => setVideoIntent({ kind: 'clear' })}
+              onKeep={() => setVideoIntent({ kind: 'keep' })}
+            />
+            <input
+              ref={videoRef}
+              type="file"
+              accept="video/mp4,video/quicktime,video/webm,.mp4,.mov,.webm"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                handleVideoPicked(e.target.files?.[0])
+                if (videoRef.current) videoRef.current.value = ''
+              }}
+            />
+          </div>
+
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 18 }}>
-            <button type="button" className="btn btn-ghost" onClick={onClose}>
+            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={busy}>
               Cancel
             </button>
-            <button type="submit" className="btn btn-primary">
-              Save changes
+            <button type="submit" className="btn btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
             </button>
           </div>
         </div>
       </form>
+    </div>
+  )
+}
+
+function VideoEditor({ currentName, currentSize, currentUrl, intent, pendingPreviewUrl, onPick, onClear, onKeep }) {
+  const hasCurrent = !!currentUrl
+  if (intent.kind === 'replace') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+        <Icon name="play" size={14} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {intent.file.name}
+          </div>
+          <div style={{ color: 'var(--ink-mute)' }}>
+            {(intent.file.size / 1024 / 1024).toFixed(1)} MB · uploads on Save
+            {hasCurrent ? ' (replaces current video)' : ''}
+          </div>
+        </div>
+        {pendingPreviewUrl && (
+          <a
+            href={pendingPreviewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn btn-ghost btn-sm"
+          >
+            View
+          </a>
+        )}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onKeep}>
+          Undo
+        </button>
+      </div>
+    )
+  }
+  if (intent.kind === 'clear') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-mute)' }}>
+        <Icon name="trash" size={14} />
+        <span style={{ flex: 1 }}>Video will be removed on Save.</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onKeep}>
+          Undo
+        </button>
+      </div>
+    )
+  }
+  if (!hasCurrent) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12, color: 'var(--ink-mute)' }}>
+        <Icon name="video" size={14} />
+        <span style={{ flex: 1 }}>No video attached.</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onPick}>
+          Upload video
+        </button>
+      </div>
+    )
+  }
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+      <Icon name="play" size={14} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {currentName || 'Walk-through video'}
+        </div>
+        {typeof currentSize === 'number' && (
+          <div style={{ color: 'var(--ink-mute)' }}>{(currentSize / 1024 / 1024).toFixed(1)} MB</div>
+        )}
+      </div>
+      <a
+        href={currentUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="btn btn-ghost btn-sm"
+      >
+        Open
+      </a>
+      <a
+        href={currentUrl}
+        download={currentName || ''}
+        className="btn btn-ghost btn-sm"
+      >
+        Download
+      </a>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onPick}>
+        Replace
+      </button>
+      <button type="button" className="btn btn-ghost btn-sm btn-danger" onClick={onClear}>
+        Remove
+      </button>
     </div>
   )
 }

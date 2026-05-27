@@ -31,6 +31,11 @@ const propertyAddArgs = {
   posterStorageId: v.optional(v.id('_storage')),
   posterName: v.optional(v.string()),
   posterSize: v.optional(v.number()),
+  // Optional walk-through video uploaded at Add Property time.
+  videoStorageId: v.optional(v.id('_storage')),
+  videoName: v.optional(v.string()),
+  videoSize: v.optional(v.number()),
+  videoContentType: v.optional(v.string()),
 }
 
 async function resolveImages(ctx: any, images: any[] | undefined) {
@@ -52,6 +57,7 @@ export const list = query({
         ...p,
         images: await resolveImages(ctx, p.images),
         posterUrl: p.posterStorageId ? await ctx.storage.getUrl(p.posterStorageId) : null,
+        videoUrl: p.videoStorageId ? await ctx.storage.getUrl(p.videoStorageId) : null,
       })),
     )
   },
@@ -66,6 +72,7 @@ export const get = query({
       ...p,
       images: await resolveImages(ctx, p.images),
       posterUrl: p.posterStorageId ? await ctx.storage.getUrl(p.posterStorageId) : null,
+      videoUrl: p.videoStorageId ? await ctx.storage.getUrl(p.videoStorageId) : null,
     }
   },
 })
@@ -74,13 +81,27 @@ export const add = mutation({
   args: propertyAddArgs,
   handler: async (ctx, args) => {
     const now = Date.now()
-    const { posterStorageId, posterName, posterSize, ...rest } = args
+    const {
+      posterStorageId,
+      posterName,
+      posterSize,
+      videoStorageId,
+      videoName,
+      videoSize,
+      videoContentType,
+      ...rest
+    } = args
     return ctx.db.insert('properties', {
       ...rest,
       posterStorageId,
       posterName,
       posterSize,
       posterAddedAt: posterStorageId ? now : undefined,
+      videoStorageId,
+      videoName,
+      videoSize,
+      videoContentType,
+      videoAddedAt: videoStorageId ? now : undefined,
       status: posterStorageId ? 'poster_attached' : 'data_received',
       createdAt: now,
     })
@@ -133,6 +154,14 @@ export const update = mutation({
       posterExtractedAt: v.optional(v.number()),
       posterExtractionRaw: v.optional(v.string()),
       posterExtractionOk: v.optional(v.boolean()),
+      // Video fields are normally written via setVideo, but the patch
+      // validator accepts them so a future power-form can edit metadata
+      // (e.g. rename) without going through setVideo.
+      videoStorageId: v.optional(v.id('_storage')),
+      videoName: v.optional(v.string()),
+      videoSize: v.optional(v.number()),
+      videoContentType: v.optional(v.string()),
+      videoAddedAt: v.optional(v.number()),
     }),
   },
   handler: async (ctx, { id, patch }) => {
@@ -194,6 +223,50 @@ export const setPoster = mutation({
   },
 })
 
+// Replace or clear the per-property walk-through video. Mirrors setPoster:
+// passing storageId: null clears the five video fields; passing a new
+// storageId deletes any previously attached blob before patching the row.
+export const setVideo = mutation({
+  args: {
+    id: v.id('properties'),
+    storageId: v.union(v.id('_storage'), v.null()),
+    name: v.optional(v.string()),
+    size: v.optional(v.number()),
+    contentType: v.optional(v.string()),
+  },
+  handler: async (ctx, { id, storageId, name, size, contentType }) => {
+    const property = await ctx.db.get(id)
+    if (!property) throw new Error('Property not found')
+
+    if (property.videoStorageId && property.videoStorageId !== storageId) {
+      try {
+        await ctx.storage.delete(property.videoStorageId)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    if (!storageId) {
+      await ctx.db.patch(id, {
+        videoStorageId: undefined,
+        videoName: undefined,
+        videoSize: undefined,
+        videoContentType: undefined,
+        videoAddedAt: undefined,
+      })
+      return
+    }
+
+    await ctx.db.patch(id, {
+      videoStorageId: storageId,
+      videoName: name,
+      videoSize: size,
+      videoContentType: contentType,
+      videoAddedAt: Date.now(),
+    })
+  },
+})
+
 export const advanceStatus = mutation({
   args: { id: v.id('properties') },
   handler: async (ctx, { id }) => {
@@ -217,6 +290,13 @@ export const remove = mutation({
     if (p?.posterStorageId) {
       try {
         await ctx.storage.delete(p.posterStorageId)
+      } catch {
+        /* ignore */
+      }
+    }
+    if (p?.videoStorageId) {
+      try {
+        await ctx.storage.delete(p.videoStorageId)
       } catch {
         /* ignore */
       }

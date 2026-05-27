@@ -11,6 +11,81 @@ import { GoogleGenAI } from '@google/genai'
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 
+// Robust JSON parse for Gemini responses. `responseMimeType: 'application/json'`
+// usually produces pure JSON, but in the wild we still see (a) markdown
+// fences, (b) trailing prose appended after the JSON object, and (c) silent
+// truncation at maxOutputTokens that leaves the JSON unterminated. Try four
+// strategies in order; the last is a brace-balanced scan that recovers any
+// well-formed `{...}` substring, surviving both leading and trailing garbage.
+// finishReason is surfaced in the error so MAX_TOKENS truncation is obvious.
+export function parseGeminiJson(
+  text: string,
+  finishReason?: string,
+): unknown {
+  const trimmed = (text || '').trim()
+  if (!trimmed) {
+    throw new Error(
+      `empty response${finishReason ? ` (finishReason=${finishReason})` : ''}`,
+    )
+  }
+  try {
+    return JSON.parse(trimmed)
+  } catch {}
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]+?)\s*```/i)
+  if (fenced) {
+    try {
+      return JSON.parse(fenced[1])
+    } catch {}
+  }
+  // Brace-balanced scan: find the first '{' and walk forward tracking nesting
+  // depth + string state. Returns the slice from that '{' through the matching
+  // '}'. Tolerates leading and trailing non-JSON content. If the scan never
+  // closes the object (truncated mid-write), throw with finishReason.
+  const start = trimmed.indexOf('{')
+  if (start !== -1) {
+    let depth = 0
+    let inStr = false
+    let escape = false
+    for (let i = start; i < trimmed.length; i++) {
+      const ch = trimmed[i]
+      if (inStr) {
+        if (escape) escape = false
+        else if (ch === '\\') escape = true
+        else if (ch === '"') inStr = false
+        continue
+      }
+      if (ch === '"') {
+        inStr = true
+        continue
+      }
+      if (ch === '{') depth++
+      else if (ch === '}') {
+        depth--
+        if (depth === 0) {
+          try {
+            return JSON.parse(trimmed.slice(start, i + 1))
+          } catch {
+            break
+          }
+        }
+      }
+    }
+  }
+  const truncationHint =
+    finishReason === 'MAX_TOKENS'
+      ? ' (response was truncated at maxOutputTokens — raise the cap)'
+      : finishReason
+        ? ` (finishReason=${finishReason})`
+        : ''
+  throw new Error(
+    `non-JSON response${truncationHint}: ${trimmed.slice(0, 300)}`,
+  )
+}
+
+function pickFinishReason(response: any): string | undefined {
+  return response?.candidates?.[0]?.finishReason
+}
+
 // Gemini vision fallback — call when regex parsing missed one of the
 // matchability fields (rent / housingType / commuteMins). The PDF is sent
 // inline; gemini-2.5-flash supports application/pdf natively at ~258
@@ -69,14 +144,10 @@ Strip "~" from approximate commute values. Strip currency symbols and commas fro
       },
     })
     const text = (response.text || '').trim()
-    let parsed: any
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      // Some models wrap JSON in ```json fences despite responseMimeType.
-      const fenced = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/i)
-      if (fenced) parsed = JSON.parse(fenced[1])
-      else throw new Error(`non-JSON response: ${text.slice(0, 300)}`)
+    let parsed: any = parseGeminiJson(text, pickFinishReason(response))
+    if (Array.isArray(parsed)) {
+      const first = parsed.find((v) => v && typeof v === 'object' && !Array.isArray(v))
+      if (first) parsed = first
     }
     const fields = sanitiseGeminiFields(parsed)
     const note = `raw=${text.slice(0, 500)} | sanitised-keys=${Object.keys(fields).join(',') || '(none)'}`
@@ -368,7 +439,7 @@ async function extractUrlWithGemini(distilled: string): Promise<{
 
   const SYSTEM = `You read the distilled HTML of a PropertyGuru Singapore listing page and extract structured facts.
 
-Return ONLY a JSON object — no prose, no markdown fences. Use these exact keys; omit any key you cannot confidently determine from the page content. Do not invent values.
+Return ONLY a single JSON object (NOT an array, NOT wrapped in [...]) — no prose, no markdown fences. The response must start with { and end with }. Use these exact keys; omit any key you cannot confidently determine from the page content. Do not invent values.
 
 {
   "condo": string,                         // development / building name, e.g. "Normanton Park"
@@ -403,17 +474,22 @@ Strip "S$", "$", commas from numeric values. If the listing says "Studio" use un
         temperature: 0.0,
         responseMimeType: 'application/json',
         thinkingConfig: { thinkingBudget: 0 },
-        maxOutputTokens: 2048,
+        // 4096 (up from 2048) so the 14-field schema has comfortable margin
+        // when the listing has long fullAddress / listingTitle values.
+        maxOutputTokens: 4096,
       },
     })
     const text = (response.text || '').trim()
-    let parsed: any
-    try {
-      parsed = JSON.parse(text)
-    } catch {
-      const fenced = text.match(/```(?:json)?\s*([\s\S]+?)\s*```/i)
-      if (fenced) parsed = JSON.parse(fenced[1])
-      else throw new Error(`non-JSON response: ${text.slice(0, 300)}`)
+    let parsed = parseGeminiJson(text, pickFinishReason(response)) as any
+    // Gemini sometimes wraps the result in [...] despite responseMimeType +
+    // an explicit "single object, not an array" hint in the system prompt.
+    // Treat a single-element array of objects as the same shape.
+    if (Array.isArray(parsed)) {
+      const first = parsed.find((v) => v && typeof v === 'object' && !Array.isArray(v))
+      if (!first) {
+        return { fields: {}, note: `Gemini returned an array with no object inside: ${text.slice(0, 300)}` }
+      }
+      parsed = first
     }
     const fields = sanitiseGeminiFields(parsed)
     const suggestedCondo =
