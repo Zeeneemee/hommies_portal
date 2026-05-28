@@ -2,6 +2,7 @@ import React from 'react'
 import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useQuery } from 'convex/react'
 import AddProperty from './components/AddProperty.jsx'
+import AddPropertyChat from './components/AddPropertyChat.jsx'
 import StatusScreen from './components/Status.jsx'
 import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
@@ -14,8 +15,13 @@ import logoUrl from './assets/logo.png'
 // routes drive the active screen — refresh / share / back-button all work.
 // The nav order is the workflow; the portal opens straight onto Add Property.
 
+const CHAT_INTAKE_ENABLED = import.meta.env.VITE_ENABLE_CHAT_INTAKE === 'true'
+
 const NAV = [
   { id: 'add', to: '/add', label: 'Add Property', step: 1 },
+  ...(CHAT_INTAKE_ENABLED
+    ? [{ id: 'add-chat', to: '/add/chat', label: 'Add (chat) · beta', step: '★' }]
+    : []),
   { id: 'status', to: '/status', label: 'Status', step: 2 },
   { id: 'recommend', to: '/recommend', label: 'Recommend', step: 3 },
   { id: 'listings', to: '/listings', label: 'Listings', step: 4 },
@@ -89,6 +95,7 @@ export default function App() {
 
   const counts = {
     add: '',
+    'add-chat': '',
     status: properties.length,
     recommend: responses.length,
     listings: properties.length,
@@ -188,6 +195,20 @@ export default function App() {
                 properties={properties}
                 draft={addDraft}
               />
+            }
+          />
+          <Route
+            path="/add/chat"
+            element={
+              CHAT_INTAKE_ENABLED ? (
+                <AddPropertyChat
+                  toast={toast}
+                  onSaved={() => navigate('/status')}
+                  draft={addDraft}
+                />
+              ) : (
+                <Navigate to="/add" replace />
+              )
             }
           />
           <Route path="/status" element={<StatusScreen toast={toast} properties={properties} />} />

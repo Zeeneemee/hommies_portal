@@ -269,27 +269,48 @@ function isPropertyGuruUrl(url: string): boolean {
 // we fall back to direct fetch and the action returns a 403 error for the
 // operator to see.
 async function proxiedFetch(targetUrl: string): Promise<{ status: number; html: string }> {
+  const scrapeDo = process.env.SCRAPEDO_API_KEY
   const scraperApi = process.env.SCRAPER_API_KEY
   const scrapingBee = process.env.SCRAPINGBEE_API_KEY
 
   let fetchUrl = targetUrl
-  let usingProxy: 'scraperapi' | 'scrapingbee' | null = null
+  let usingProxy: 'scrapedo' | 'scraperapi' | 'scrapingbee' | null = null
   // Opt-in: PG_RENDER_JS=1 asks the proxy to execute JS before returning
   // HTML. This makes lazy-loaded gallery images appear in the rendered
   // markup at the cost of ~10× more credits per request. Leave unset for
   // listings where the JSON-state parsing already finds everything.
   const renderJs = process.env.PG_RENDER_JS === '1' || process.env.PG_RENDER_JS === 'true'
+  // Opt-in: PG_PREMIUM picks the proxy tier. ScraperAPI's datacenter IPs
+  // get 403'd by PropertyGuru's Cloudflare; premium uses residential IPs
+  // (~10× credits), ultra uses the hardest-to-block pool (~25× credits).
+  // For ScrapingBee, ultra maps to stealth_proxy (top tier, premium_proxy
+  // is already on).
+  const premium = (process.env.PG_PREMIUM || '').trim().toLowerCase()
+  const wantsUltra = premium === 'ultra' || premium === 'ultra_premium'
+  const wantsPremium = wantsUltra || premium === '1' || premium === 'true' || premium === 'premium'
 
-  if (scraperApi) {
+  if (scrapeDo) {
+    // Scrape.do's default datacenter tier 502s on PropertyGuru, so always
+    // route through the residential pool (super=true). PG_PREMIUM is a no-op
+    // here — residential is the cheapest tier that works. PG_RENDER_JS=1
+    // additionally spins up a headless browser for lazy-loaded markup.
+    fetchUrl =
+      `https://api.scrape.do/?token=${encodeURIComponent(scrapeDo)}` +
+      `&url=${encodeURIComponent(targetUrl)}&geoCode=sg&super=true` +
+      (renderJs ? '&render=true' : '')
+    usingProxy = 'scrapedo'
+  } else if (scraperApi) {
     fetchUrl =
       `https://api.scraperapi.com/?api_key=${encodeURIComponent(scraperApi)}` +
       `&url=${encodeURIComponent(targetUrl)}&country_code=sg` +
+      (wantsUltra ? '&ultra_premium=true' : wantsPremium ? '&premium=true' : '') +
       (renderJs ? '&render=true' : '')
     usingProxy = 'scraperapi'
   } else if (scrapingBee) {
     fetchUrl =
       `https://app.scrapingbee.com/api/v1/?api_key=${encodeURIComponent(scrapingBee)}` +
       `&url=${encodeURIComponent(targetUrl)}&country_code=sg&premium_proxy=true` +
+      (wantsUltra ? '&stealth_proxy=true' : '') +
       (renderJs ? '&render_js=true' : '&render_js=false')
     usingProxy = 'scrapingbee'
   }
@@ -530,8 +551,16 @@ export const extractPropertyGuruUrl = action({
 
     const blocked = looksBlocked(html, status)
     if (blocked) {
-      const hasProxy = !!(process.env.SCRAPER_API_KEY || process.env.SCRAPINGBEE_API_KEY)
-      const hint = hasProxy
+      const hasProxy = !!(process.env.SCRAPEDO_API_KEY || process.env.SCRAPER_API_KEY || process.env.SCRAPINGBEE_API_KEY)
+      const head = html.slice(0, 500).toLowerCase()
+      const quotaHit =
+        head.includes('exhausted the api credits') ||
+        head.includes('exhausted your') ||
+        head.includes('monthly cycle') ||
+        head.includes('credit limit')
+      const hint = quotaHit
+        ? 'Scraping proxy is out of credits. Upgrade the plan, enable overages, or wait for the next billing cycle.'
+        : hasProxy
         ? 'The proxy returned a block. Some listings need premium proxy / JS rendering — enable those flags or try a different listing.'
         : 'Set SCRAPER_API_KEY or SCRAPINGBEE_API_KEY in Convex env to route through a residential proxy.'
       return {
