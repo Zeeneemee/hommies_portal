@@ -231,28 +231,6 @@ function PageOne({ property, content }) {
             </div>
           ))}
         </div>
-
-        {floorplanIdx != null && (
-          <>
-            <SectionTitle>Room Layout</SectionTitle>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'center',
-                marginTop: 4,
-              }}
-            >
-              <img
-                src={imgUrl(property, floorplanIdx)}
-                alt=""
-                crossOrigin="anonymous"
-                style={{ maxHeight: 280, maxWidth: '70%', display: 'block' }}
-              />
-            </div>
-          </>
-        )}
-
-        <SectionTitle>Room Details</SectionTitle>
       </div>
     </PageFrame>
   )
@@ -263,6 +241,8 @@ function PageOne({ property, content }) {
 function DetailsTable({ rows }) {
   return (
     <div style={{ marginTop: 4 }}>
+   <SectionTitle>Room Details</SectionTitle>
+
       {rows.map((row, i) => (
         <div
           key={row.label}
@@ -439,7 +419,19 @@ function PageTwo({ property, content, primaryUni }) {
   const sizeText =
     typeof property.sizeSqft === 'number' ? `${property.sizeSqft} sqft` : content?.size
   const furnishingText = property.furnishing || content?.furnishing
+  // Bed/bath shorthand — "1B1B" / "2B2B" style from PG convention. Falls back
+  // to "X bed" or "X bath" when only one of the two was extracted. Empty when
+  // neither.
+  const bedBathText = (() => {
+    const b = property.bedrooms
+    const ba = property.bathrooms
+    if (typeof b === 'number' && typeof ba === 'number') return `${b}B${ba}B`
+    if (typeof b === 'number') return `${b} bed`
+    if (typeof ba === 'number') return `${ba} bath`
+    return null
+  })()
   const detailRows = [
+    bedBathText ? { label: 'Layout', value: bedBathText } : null,
     property.unitType ? { label: 'Room type', value: property.unitType } : null,
     sizeText ? { label: 'Size', value: sizeText } : null,
     furnishingText ? { label: 'Furnishing', value: furnishingText } : null,
