@@ -14,8 +14,11 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
   const { id } = useParams()
   const navigate = useNavigate()
   const assignments = useQuery('assignments:list', { responseId: id }) ?? []
+  const sales = useQuery('sales:byResponse', { responseId: id }) ?? []
   const pin = useMutation('assignments:pin')
   const markSent = useMutation('assignments:markSent')
+  const closeSale = useMutation('sales:close')
+  const uncloseSale = useMutation('sales:unclose')
 
   const response = responses.find((r) => r._id === id)
 
@@ -33,28 +36,39 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
     return m
   }, [assignments])
 
+  // Active closed-sale lookup by propertyId — overrides 'sent' state.
+  const saleByProp = React.useMemo(() => {
+    const m = new Map()
+    for (const s of sales) {
+      if (s.unclosedAt !== undefined) continue
+      m.set(s.propertyId, s)
+    }
+    return m
+  }, [sales])
+
   const decorated = React.useMemo(() => {
     const q = search.trim().toLowerCase()
     const list = properties
       .map((p) => {
+        const sale = saleByProp.get(p._id)
         const a = activeByProp.get(p._id)
-        const state = a ? a.status : 'idle'
-        return { property: p, assignment: a, state }
+        const state = sale ? 'closed' : a ? a.status : 'idle'
+        return { property: p, assignment: a, sale, state }
       })
       .filter(({ property, state }) => {
-        if (hideSent && state === 'sent') return false
+        if (hideSent && (state === 'sent' || state === 'closed')) return false
         if (q && !(property.condo || '').toLowerCase().includes(q)) return false
         return true
       })
-    // Sent first (so the operator sees what's done), then queued, then idle.
+    // Closed first (the win), then sent, queued, idle.
     // Within each, sort by condo name for predictability.
-    const rank = { sent: 0, pinned: 1, idle: 2 }
+    const rank = { closed: -1, sent: 0, pinned: 1, idle: 2 }
     return list.sort((a, b) => {
       const r = rank[a.state] - rank[b.state]
       if (r !== 0) return r
       return (a.property.condo || '').localeCompare(b.property.condo || '')
     })
-  }, [properties, activeByProp, search, hideSent])
+  }, [properties, activeByProp, saleByProp, search, hideSent])
 
   const counts = React.useMemo(() => {
     let sent = 0
@@ -64,8 +78,9 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
       if (a.status === 'sent') sent += 1
       else if (a.status === 'pinned') queued += 1
     }
-    return { sent, queued, total: properties.length }
-  }, [assignments, properties])
+    const closed = Array.from(saleByProp.values()).length
+    return { sent, queued, closed, total: properties.length }
+  }, [assignments, saleByProp, properties])
 
   if (!response) {
     return (
@@ -98,6 +113,34 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
       toast?.(`${property.condo} marked sent to ${response.name}.`)
     } catch (err) {
       toast?.(`Couldn't mark sent — ${err?.message || 'try again'}.`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleCloseSale(property, finalRentSGD) {
+    setBusyId(property._id)
+    try {
+      await closeSale({
+        responseId: response._id,
+        propertyId: property._id,
+        finalRentSGD: Number.isFinite(finalRentSGD) ? finalRentSGD : undefined,
+      })
+      toast?.(`Closed — ${property.condo} → ${response.name}.`)
+    } catch (err) {
+      toast?.(`Couldn't close — ${err?.message || 'try again'}.`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleUnclose(sale, property) {
+    setBusyId(property._id)
+    try {
+      await uncloseSale({ id: sale._id })
+      toast?.(`Reopened — ${property.condo} is back to sent.`)
+    } catch (err) {
+      toast?.(`Couldn't reopen — ${err?.message || 'try again'}.`)
     } finally {
       setBusyId(null)
     }
@@ -146,15 +189,18 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
         </div>
       ) : (
         <div className="detail-properties-grid">
-          {decorated.map(({ property, assignment, state }) => (
+          {decorated.map(({ property, assignment, sale, state }) => (
             <PropertyMarkCard
               key={property._id}
               property={property}
               assignment={assignment}
+              sale={sale}
               state={state}
               busy={busyId === property._id}
               schoolKey={SCHOOLS_TO_COMMUTE_KEY[response.school]}
               onMarkSent={() => handleMarkSent(property, assignment)}
+              onCloseSale={(rent) => handleCloseSale(property, rent)}
+              onUnclose={() => sale && handleUnclose(sale, property)}
             />
           ))}
         </div>
@@ -221,6 +267,7 @@ function CustomerHero({ response: r, counts }) {
         </div>
       </div>
       <div className="customer-hero-counts">
+        <HeroCount label="Closed" value={counts.closed} kind="closed" />
         <HeroCount label="Sent" value={counts.sent} kind="sent" />
         <HeroCount label="Queued" value={counts.queued} kind="queued" />
         <HeroCount label="Properties" value={counts.total} kind="total" />
@@ -247,12 +294,24 @@ function HeroCount({ label, value, kind }) {
   )
 }
 
-function PropertyMarkCard({ property: p, assignment, state, busy, schoolKey, onMarkSent }) {
+function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKey, onMarkSent, onCloseSale, onUnclose }) {
   const commute = p.commuteMins?.[schoolKey]
   const isSent = state === 'sent'
   const isQueued = state === 'pinned'
+  const isClosed = state === 'closed'
   const hero = p.images?.[0]
   const photoCount = p.images?.length || 0
+  const [showCloseForm, setShowCloseForm] = React.useState(false)
+  const [rentDraft, setRentDraft] = React.useState(
+    typeof p.rentSGD === 'number' ? String(p.rentSGD) : '',
+  )
+
+  function submitClose(e) {
+    e?.preventDefault?.()
+    const parsed = Number(rentDraft)
+    onCloseSale?.(Number.isFinite(parsed) && parsed > 0 ? parsed : undefined)
+    setShowCloseForm(false)
+  }
 
   return (
     <div
@@ -273,6 +332,11 @@ function PropertyMarkCard({ property: p, assignment, state, busy, schoolKey, onM
         {photoCount > 1 && (
           <span className="prop-mark-card-hero-count">
             <Icon name="photo" size={10} /> {photoCount}
+          </span>
+        )}
+        {isClosed && (
+          <span className="prop-mark-card-hero-badge prop-mark-card-hero-badge--closed">
+            <Icon name="check" size={10} /> Closed
           </span>
         )}
         {isSent && (
@@ -318,7 +382,7 @@ function PropertyMarkCard({ property: p, assignment, state, busy, schoolKey, onM
         </div>
       </div>
 
-      {!isSent && (
+      {!isSent && !isClosed && (
         <button
           type="button"
           className={`prop-mark-action ${isQueued ? 'prop-mark-action--queued' : ''}`}
@@ -335,12 +399,76 @@ function PropertyMarkCard({ property: p, assignment, state, busy, schoolKey, onM
           )}
         </button>
       )}
-      {isSent && assignment?.sentAt && (
+      {isSent && !showCloseForm && (
         <div className="prop-mark-sent-meta">
-          Sent {fmtShortDate(assignment.sentAt)}
-          {assignment.sentVia && (
-            <span className="muted-suffix"> · via {assignment.sentVia}</span>
+          {assignment?.sentAt && (
+            <span>
+              Sent {fmtShortDate(assignment.sentAt)}
+              {assignment.sentVia && (
+                <span className="muted-suffix"> · via {assignment.sentVia}</span>
+              )}
+            </span>
           )}
+          <button
+            type="button"
+            className="prop-mark-action prop-mark-action--close"
+            onClick={() => setShowCloseForm(true)}
+            disabled={busy}
+          >
+            <Icon name="check" size={12} />
+            <span>Mark closed</span>
+          </button>
+        </div>
+      )}
+      {isSent && showCloseForm && (
+        <form className="prop-mark-close-form" onSubmit={submitClose}>
+          <label className="fact-label">Final rent (S$/mo)</label>
+          <div className="prop-mark-close-row">
+            <input
+              type="number"
+              className="input"
+              min="0"
+              step="50"
+              autoFocus
+              value={rentDraft}
+              onChange={(e) => setRentDraft(e.target.value)}
+              placeholder="e.g. 1700"
+            />
+            <button type="submit" className="prop-mark-action prop-mark-action--close" disabled={busy}>
+              {busy ? 'Saving…' : 'Confirm close'}
+            </button>
+            <button
+              type="button"
+              className="prop-mark-action prop-mark-action--ghost"
+              onClick={() => setShowCloseForm(false)}
+              disabled={busy}
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {isClosed && (
+        <div className="prop-mark-closed-meta">
+          <div>
+            <span className="fact-label">Closed</span>
+            <span className="prop-mark-closed-val">
+              {sale?.closedAt ? fmtShortDate(sale.closedAt) : '—'}
+              {typeof sale?.finalRentSGD === 'number' && (
+                <span className="muted-suffix">
+                  {' · '}S${sale.finalRentSGD.toLocaleString()}/mo
+                </span>
+              )}
+            </span>
+          </div>
+          <button
+            type="button"
+            className="prop-mark-action prop-mark-action--ghost"
+            onClick={onUnclose}
+            disabled={busy}
+          >
+            {busy ? 'Saving…' : 'Undo close'}
+          </button>
         </div>
       )}
     </div>

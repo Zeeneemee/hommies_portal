@@ -139,4 +139,19 @@ export default defineSchema({
     .index('by_property', ['propertyId'])
     .index('by_response', ['responseId'])
     .index('by_status', ['status']),
+
+  // Closed deals — one row per (customer, property) sale. Created from the
+  // customer detail page once a sent property turns into a signed lease.
+  // unclosedAt is a tombstone so the operator can undo a mistaken close
+  // without losing the historical record.
+  sales: defineTable({
+    responseId: v.id('responses'),
+    propertyId: v.id('properties'),
+    finalRentSGD: v.optional(v.number()),
+    closedAt: v.number(),
+    unclosedAt: v.optional(v.number()),
+  })
+    .index('by_property', ['propertyId'])
+    .index('by_response', ['responseId'])
+    .index('by_closedAt', ['closedAt']),
 })

@@ -8,6 +8,7 @@ import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
 import CustomersScreen from './components/Customers.jsx'
 import CustomerDetail from './components/CustomerDetail.jsx'
+import SalesScreen from './components/Sales.jsx'
 import { Toast, Icon } from './components/ui.jsx'
 import logoUrl from './assets/logo.png'
 
@@ -27,6 +28,7 @@ const NAV = [
   { id: 'recommend', to: '/recommend', label: 'Recommend', step: 3 },
   { id: 'listings', to: '/listings', label: 'Listings', step: 4 },
   { id: 'customers', to: '/customers', label: 'Customers', step: 5 },
+  { id: 'sales', to: '/sales', label: 'Sales', step: 6 },
 ]
 
 // Add-Property draft, held at the App level so it survives sidebar
@@ -91,6 +93,8 @@ export default function App() {
   const linked = !!import.meta.env.VITE_CONVEX_URL
   const properties = useQuery('properties:list') ?? []
   const responses = useQuery('responses:list') ?? []
+  const sales = useQuery('sales:list') ?? []
+  const activeSalesCount = sales.filter((s) => s.unclosedAt === undefined).length
 
   if (!linked) return <NotLinkedNotice />
 
@@ -101,6 +105,7 @@ export default function App() {
     recommend: responses.length,
     listings: properties.length,
     customers: responses.length,
+    sales: activeSalesCount,
   }
 
   const today = new Date().toLocaleDateString('en-SG', {
@@ -228,6 +233,7 @@ export default function App() {
             path="/customers/:id"
             element={<CustomerDetail toast={toast} responses={responses} properties={properties} />}
           />
+          <Route path="/sales" element={<SalesScreen toast={toast} sales={sales} />} />
           <Route path="*" element={<Navigate to="/add" replace />} />
         </Routes>
 
