@@ -403,6 +403,7 @@ export default function AddProperty({ toast, onSaved, draft }) {
       const SAVE_FIELDS = [
         'rentSGD', 'area', 'buildingType', 'housingType',
         'ageYears', 'unitType', 'fullAddress', 'commuteMins',
+        'masterCount', 'commonCount',
       ]
       const savable = {}
       for (const k of SAVE_FIELDS) if (extracted?.[k] !== undefined) savable[k] = extracted[k]

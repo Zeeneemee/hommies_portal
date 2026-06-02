@@ -4,6 +4,21 @@
 // parseGoogleFormCSV so the in-app CSV import and the sheet-trigger import
 // produce identical records.
 
+// Match-key normaliser shared between upsertFromSheet's tier-2 dedupe and the
+// one-shot mergeDuplicates cleanup mutation. Empty key means "anonymous" and
+// must never collapse rows together.
+export function normaliseMatchKey(input: { name: unknown; contact: unknown }): string {
+  const norm = (s: unknown) =>
+    String(s ?? '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+  const n = norm(input.name)
+  const c = norm(input.contact)
+  if (!n && !c) return ''
+  return `${n}|${c}`
+}
+
 export type NormalisedResponse = {
   name: string
   channel: string
@@ -17,6 +32,7 @@ export type NormalisedResponse = {
   unitLayout: string[]
   commuteTolMins: number
   wantRoommate: boolean
+  groupSize?: number
   extras: {
     petFriendly: boolean
     cookingAllowed: boolean
@@ -83,6 +99,19 @@ function parseCommute(s: unknown): number {
   return m ? +m[1] : 30
 }
 
+// "3", "3 people", "我们三个" → 3; "couple"/"一對"/"一对" → 2. Empty or
+// unparseable → undefined (engine treats absence as solo, no hardcoded default).
+export function parseGroupSize(s: unknown): number | undefined {
+  const text = String(s ?? '').trim()
+  if (!text) return undefined
+  if (/^(couple|情侶|情侣|一對|一对)/i.test(text)) return 2
+  const m = text.match(/(\d{1,2})/)
+  if (!m) return undefined
+  const n = Number(m[1])
+  if (!Number.isFinite(n) || n < 1) return undefined
+  return Math.floor(n)
+}
+
 export function normaliseSheetRows(headers: string[], rows: unknown[][]): NormalisedResponse[] {
   const col = {
     timestamp: findCol(headers, 'timestamp', 'ประทับเวลา', '時間戳記', '時間', '时间'),
@@ -99,6 +128,7 @@ export function normaliseSheetRows(headers: string[], rows: unknown[][]): Normal
     layout: findCol(headers, '單位格局', '单位格局', 'layout'),
     commute: findCol(headers, '通勤', 'commute'),
     roommate: findCol(headers, '室友', 'roommate'),
+    groupSize: findCol(headers, 'group size', 'party size', 'how many', '人數', '人数', '组数', '組數'),
     extras: findCol(headers, '其他需求', '特殊需求', 'extras', 'requirements'),
   }
 
@@ -123,6 +153,7 @@ export function normaliseSheetRows(headers: string[], rows: unknown[][]): Normal
         unitLayout: parseLayouts(r[col.layout]),
         commuteTolMins: parseCommute(r[col.commute]),
         wantRoommate: /yes|是|想|要|true/i.test(cell(r, col.roommate)),
+        groupSize: parseGroupSize(r[col.groupSize]),
         extras: {
           petFriendly: /pet|寵物|宠物/i.test(extrasText),
           cookingAllowed: /cook|煮|開伙|开伙|下廚|下厨/i.test(extrasText),

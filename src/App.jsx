@@ -7,6 +7,7 @@ import StatusScreen from './components/Status.jsx'
 import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
 import CustomersScreen from './components/Customers.jsx'
+import CustomerDetail from './components/CustomerDetail.jsx'
 import { Toast, Icon } from './components/ui.jsx'
 import logoUrl from './assets/logo.png'
 
@@ -221,7 +222,11 @@ export default function App() {
           <Route path="/listings" element={<ListingsScreen properties={properties} toast={toast} />} />
           <Route
             path="/customers"
-            element={<CustomersScreen toast={toast} responses={responses} />}
+            element={<CustomersScreen toast={toast} responses={responses} properties={properties} />}
+          />
+          <Route
+            path="/customers/:id"
+            element={<CustomerDetail toast={toast} responses={responses} properties={properties} />}
           />
           <Route path="*" element={<Navigate to="/add" replace />} />
         </Routes>

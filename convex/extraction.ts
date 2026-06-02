@@ -116,10 +116,12 @@ Return ONLY a JSON object — no prose, no markdown fences, no commentary. Use t
   "ageYears": number,                      // building age in years, integer
   "unitType": "Common Room" | "Master Room" | "Studio" | "Whole Unit",
   "fullAddress": string,                   // full street address if shown
-  "commuteMins": { "NUS": number, "NTU": number, "SMU": number }  // all three required as integers; omit the whole object if any is missing
+  "commuteMins": { "NUS": number, "NTU": number, "SMU": number },  // all three required as integers; omit the whole object if any is missing
+  "masterCount": number,                   // number of master bedrooms (whole-unit listings only). Omit if poster does not say.
+  "commonCount": number                    // number of common bedrooms (whole-unit listings only). Omit if poster does not say.
 }
 
-Strip "~" from approximate commute values. Strip currency symbols and commas from rent.`
+Strip "~" from approximate commute values. Strip currency symbols and commas from rent. For whole-unit listings, count master and common bedrooms separately — only include masterCount/commonCount when the poster names them; do not infer from a generic "3-bedroom" label.`
 
   try {
     const response = await ai.models.generateContent({
@@ -192,6 +194,10 @@ function sanitiseGeminiFields(raw: any): Record<string, unknown> {
   if (num(raw.sizeSqft) != null && num(raw.sizeSqft)! > 0) out.sizeSqft = num(raw.sizeSqft)
   if (num(raw.bedrooms) != null && num(raw.bedrooms)! > 0) out.bedrooms = num(raw.bedrooms)
   if (num(raw.bathrooms) != null && num(raw.bathrooms)! > 0) out.bathrooms = num(raw.bathrooms)
+  const mc = num(raw.masterCount)
+  if (mc != null && mc >= 0 && Number.isInteger(mc)) out.masterCount = mc
+  const cc = num(raw.commonCount)
+  if (cc != null && cc >= 0 && Number.isInteger(cc)) out.commonCount = cc
   if (typeof raw.furnishing === 'string' && raw.furnishing.trim()) out.furnishing = raw.furnishing.trim()
   if (typeof raw.availability === 'string' && raw.availability.trim()) out.availability = raw.availability.trim()
   if (typeof raw.listingTitle === 'string' && raw.listingTitle.trim()) out.listingTitle = raw.listingTitle.trim()
@@ -474,6 +480,8 @@ Return ONLY a single JSON object (NOT an array, NOT wrapped in [...]) — no pro
   "sizeSqft": number,                      // floor area in square feet, integer (just the number)
   "bedrooms": number,                      // number of bedrooms in the unit
   "bathrooms": number,                     // number of bathrooms in the unit
+  "masterCount": number,                   // number of master bedrooms (whole-unit listings only). Omit if the listing does not say.
+  "commonCount": number,                   // number of common bedrooms (whole-unit listings only). Omit if the listing does not say.
   "furnishing": string,                    // e.g. "Fully furnished", "Partially furnished", "Unfurnished"
   "availability": string,                  // when the unit is available, e.g. "Ready to move in", "1 Jul 2026"
   "listingTitle": string                   // the listing's headline as written, e.g. "1 Bedroom Studio (Type A2) — high floor, balcony"

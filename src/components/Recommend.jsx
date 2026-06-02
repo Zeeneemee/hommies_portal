@@ -7,6 +7,11 @@ import {
   parseGoogleFormCSV,
   decide,
 } from '../decisionLogic.js'
+import {
+  partitionAssignmentsForProperty,
+  partitionAssignmentsForClient,
+  isPairCovered,
+} from '../assignmentHelpers.js'
 import { Icon, Pill, StatusPill } from './ui.jsx'
 import ManualResponseModal from './ManualResponseModal.jsx'
 
@@ -60,48 +65,6 @@ function recommendListingsForClient(client, properties) {
   send.sort((a, b) => b.decision.score - a.decision.score)
   hold.sort((a, b) => b.decision.score - a.decision.score)
   return { send, hold }
-}
-
-// Split a property's assignments into active-pinned and sent lists.
-// Unpinned rows (tombstones) are filtered out of both — they survive in the
-// database for audit only.
-export function partitionAssignmentsForProperty(propertyId, assignments) {
-  const pinned = []
-  const sent = []
-  for (const a of assignments || []) {
-    if (a.propertyId !== propertyId) continue
-    if (a.unpinnedAt !== undefined) continue
-    if (a.status === 'pinned') pinned.push(a)
-    else if (a.status === 'sent') sent.push(a)
-  }
-  pinned.sort((a, b) => b.pinnedAt - a.pinnedAt)
-  sent.sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0))
-  return { pinned, sent }
-}
-
-// Symmetric — split a client's assignments by their other axis.
-export function partitionAssignmentsForClient(responseId, assignments) {
-  const pinned = []
-  const sent = []
-  for (const a of assignments || []) {
-    if (a.responseId !== responseId) continue
-    if (a.unpinnedAt !== undefined) continue
-    if (a.status === 'pinned') pinned.push(a)
-    else if (a.status === 'sent') sent.push(a)
-  }
-  pinned.sort((a, b) => b.pinnedAt - a.pinnedAt)
-  sent.sort((a, b) => (b.sentAt ?? 0) - (a.sentAt ?? 0))
-  return { pinned, sent }
-}
-
-// True when (propertyId, responseId) has any non-tombstone assignment row.
-function isPairCovered(propertyId, responseId, assignments) {
-  return (assignments || []).some(
-    (a) =>
-      a.propertyId === propertyId &&
-      a.responseId === responseId &&
-      a.unpinnedAt === undefined,
-  )
 }
 
 export default function RecommendScreen({ toast, properties, responses }) {
@@ -820,6 +783,12 @@ function ScorePair({ pinnedScore, currentScore }) {
   )
 }
 
+// Thousands-separator-aware S$ number formatter (no currency prefix — caller adds `S$`).
+const sgdFormatter = new Intl.NumberFormat('en-SG', { maximumFractionDigits: 0 })
+function formatSGD(n) {
+  return typeof n === 'number' && Number.isFinite(n) ? sgdFormatter.format(n) : String(n ?? '')
+}
+
 function relativeTime(ms) {
   if (!ms) return ''
   const diff = Date.now() - ms
@@ -1101,9 +1070,22 @@ function PropertyMatchCard({ variant, rank, property, decision, client, assignme
           <span className="meta">
             {property.area ? ` · ${property.area}` : ''}
             {property.unitType ? ` · ${property.unitType}` : ''}
-            {typeof property.rentSGD === 'number' ? ` · S$${property.rentSGD}/mo` : ''}
+            {typeof property.rentSGD === 'number' ? ` · S$${formatSGD(property.rentSGD)}/mo` : ''}
           </span>
         </div>
+        {decision.groupContext && (
+          <div className="meta" style={{ color: 'var(--ink-mute)' }}>
+            Split for {decision.groupContext.groupSize}:{' '}
+            {decision.groupContext.split.master != null && (
+              <>S${formatSGD(Math.round(decision.groupContext.split.master))} master</>
+            )}
+            {decision.groupContext.split.master != null && decision.groupContext.split.common != null && ' / '}
+            {decision.groupContext.split.common != null && (
+              <>S${formatSGD(Math.round(decision.groupContext.split.common))} common</>
+            )}
+            {' · per person'}
+          </div>
+        )}
         <div className="meta">
           {property.buildingType || '—'}
           {property.commuteMins && client?.school && client.school !== 'OTHER'

@@ -16,6 +16,7 @@ export default function ManualResponseModal({ onClose, onSave }) {
     unitLayout: ['Common Room'],
     commuteTolMins: 25,
     wantRoommate: true,
+    groupSize: undefined,
     extras: { petFriendly: false, cookingAllowed: true, quiet: false, nearGym: false, note: '' },
   })
   const upd = (k, v) => setR((s) => ({ ...s, [k]: v }))
@@ -100,6 +101,19 @@ export default function ManualResponseModal({ onClose, onSave }) {
                 />
               </div>
             </Field>
+            <Field label="Roommates" hint="0 = solo" span={3}>
+              <div className="input-prefix">
+                <span className="px">ppl</span>
+                <input
+                  value={r.groupSize && r.groupSize > 1 ? r.groupSize - 1 : 0}
+                  onChange={(e) => {
+                    const n = Math.max(0, Math.min(6, +e.target.value || 0))
+                    upd('groupSize', n === 0 ? undefined : n + 1)
+                  }}
+                  inputMode="numeric"
+                />
+              </div>
+            </Field>
 
             <Field label="Budget min" span={3}>
               <div className="input-prefix">
@@ -128,7 +142,7 @@ export default function ManualResponseModal({ onClose, onSave }) {
                 <option>HDB</option>
               </select>
             </Field>
-            <Field label="Housing" span={3}>
+            <Field label="Housing" span={6}>
               <Segment options={['Room', 'Whole Unit']} value={r.housingType} onChange={(v) => upd('housingType', v)} />
             </Field>
 

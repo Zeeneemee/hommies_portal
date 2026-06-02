@@ -78,6 +78,8 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
     buildingType: property.buildingType || '',
     unitType: property.unitType || '',
     housingType: property.housingType || '',
+    masterCount: property.masterCount ?? '',
+    commonCount: property.commonCount ?? '',
     area: property.area || '',
     ageYears: property.ageYears ?? '',
     fullAddress: property.fullAddress || '',
@@ -111,6 +113,15 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
       area: strOrUndef(f.area),
       ageYears: numOrUndef(f.ageYears),
       fullAddress: strOrUndef(f.fullAddress),
+    }
+    // Master / common counts: only meaningful for whole-unit listings.
+    // numOrUndef returns undefined for blanks, which update() strips — that
+    // leaves the stored value alone. Saving a count clamps to >= 0.
+    if (f.housingType === 'Whole Unit') {
+      const m = numOrUndef(f.masterCount)
+      const c = numOrUndef(f.commonCount)
+      if (m != null && m >= 0) patch.masterCount = Math.floor(m)
+      if (c != null && c >= 0) patch.commonCount = Math.floor(c)
     }
     const nus = numOrUndef(f.commuteNUS)
     const ntu = numOrUndef(f.commuteNTU)
@@ -219,6 +230,31 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
                 onChange={(v) => upd('housingType', v)}
               />
             </Field>
+
+            {f.housingType === 'Whole Unit' && (
+              <Field
+                label="Bedroom composition (master / common)"
+                hint="Drives the per-person rent split for group customers"
+                span={12}
+              >
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    value={f.masterCount}
+                    onChange={(e) => upd('masterCount', e.target.value)}
+                    placeholder="Master rooms"
+                  />
+                  <input
+                    className="input"
+                    inputMode="numeric"
+                    value={f.commonCount}
+                    onChange={(e) => upd('commonCount', e.target.value)}
+                    placeholder="Common rooms"
+                  />
+                </div>
+              </Field>
+            )}
 
             <Field label="Area" span={6}>
               <input

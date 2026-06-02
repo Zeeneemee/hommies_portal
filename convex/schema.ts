@@ -31,6 +31,12 @@ export default defineSchema({
     unitType: v.optional(v.string()),
     rentSGD: v.optional(v.number()),
     housingType: v.optional(v.union(v.literal('Room'), v.literal('Whole Unit'))),
+    // Whole-unit room composition — drives the per-person rent split for
+    // group customers. Both fields are optional; absent counts opt the
+    // listing out of split-aware recommend behaviour. Operator-confirmed
+    // (Gemini drafts in extraction, operator edits in ListingEditModal).
+    masterCount: v.optional(v.number()),
+    commonCount: v.optional(v.number()),
     fullAddress: v.optional(v.string()),
     commuteMins: v.optional(
       v.object({
@@ -93,6 +99,9 @@ export default defineSchema({
     unitLayout: v.array(v.string()),
     commuteTolMins: v.number(),
     wantRoommate: v.boolean(),
+    // Party size including the responding customer. Absent = solo;
+    // > 1 unlocks group-aware split scoring in decide().
+    groupSize: v.optional(v.number()),
     extras: v.object({
       petFriendly: v.boolean(),
       cookingAllowed: v.boolean(),
