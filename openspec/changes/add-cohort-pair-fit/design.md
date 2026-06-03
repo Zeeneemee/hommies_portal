@@ -15,7 +15,7 @@ The scoring rules locked in this design were validated against a worked trace du
 **Goals:**
 - A single deterministic pure function `pairFitForProperty(a, b, prop)` that, given two response records and one property record, returns a structured decision usable by both ranking code and UI display.
 - Total-conserving rent assignment: each customer in the pair gets a concrete `perPersonRent` value matching a real room slot on the property.
-- Honest, narrow gates: only the four blockers (`consent_missing`, `movein_too_far`, `lease_mismatch`, `budget_unaffordable`) and the three scored factors (budget, commute, move-in). Nothing else.
+- Honest, narrow gates: only the three blockers (`consent_missing`, `lease_mismatch`, `budget_unaffordable`) and the three scored factors (budget, commute, move-in). Move-in date alignment is a quality signal, not a gate — co-tenants negotiate one lease-start date downstream.
 - Lifestyle data (`quiet`, `cooking`, `petFriendly`, `extras.note`) surfaced as operator-visible notes but never scored.
 - Tolerant parsers for `moveIn` and `leaseLength` strings; unparseable inputs degrade gracefully (soft on schedule factors, never silently block).
 

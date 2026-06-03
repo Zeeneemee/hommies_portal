@@ -3,6 +3,7 @@ import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'reac
 import { useQuery } from 'convex/react'
 import AddProperty from './components/AddProperty.jsx'
 import AddPropertyChat from './components/AddPropertyChat.jsx'
+import BatchAddProperty from './components/BatchAddProperty.jsx'
 import StatusScreen from './components/Status.jsx'
 import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
@@ -24,6 +25,7 @@ const NAV = [
   ...(CHAT_INTAKE_ENABLED
     ? [{ id: 'add-chat', to: '/add/chat', label: 'Add (chat) · beta', step: '★' }]
     : []),
+  { id: 'batch', to: '/add/batch', label: 'Batch Add', step: '1+' },
   { id: 'status', to: '/status', label: 'Status', step: 2 },
   { id: 'recommend', to: '/recommend', label: 'Recommend', step: 3 },
   { id: 'listings', to: '/listings', label: 'Listings', step: 4 },
@@ -82,6 +84,69 @@ function useAddPropertyDraft() {
   }
 }
 
+// Batch Add draft — lifted to App so navigation doesn't unmount BatchAddProperty.
+// JSON-safe slice (URLs, extracted/edited fields, status, condo, primaryUni,
+// savedPropertyId, error, lastEditedAt, posterGeneratedAt) is mirrored to
+// localStorage. Image files and poster blobs are in-memory only — on refresh,
+// any row that depended on them resets to `queued` so re-extraction is one click.
+const BATCH_KEY = 'hommies.batchAdd.v1'
+const BATCH_SAFE_STATUSES = new Set(['queued', 'failed', 'saved', 'save_failed'])
+function useBatchAddDraft() {
+  const [urlInput, setUrlInput] = React.useState('')
+  const [maxParallel, setMaxParallel] = React.useState(1)
+  const [rows, setRows] = React.useState(() => {
+    try {
+      const raw = window.localStorage.getItem(BATCH_KEY)
+      if (!raw) return []
+      const data = JSON.parse(raw)
+      if (!Array.isArray(data?.rows)) return []
+      return data.rows.map((r) => ({
+        id: r.id,
+        url: r.url,
+        // After refresh, ready / generating_poster / saving rows lose their
+        // blobs — fall back to queued so the worker re-extracts.
+        status: BATCH_SAFE_STATUSES.has(r.status) ? r.status : 'queued',
+        extracted: r.extracted || null,
+        condo: r.condo || '',
+        images: [],
+        posterFile: null,
+        posterPreviewUrl: null,
+        projectUrl: r.projectUrl || null,
+        primaryUni: r.primaryUni || null,
+        savedPropertyId: r.savedPropertyId || null,
+        error: r.error || null,
+        skippedReason: null,
+        lastEditedAt: r.lastEditedAt || 0,
+        posterGeneratedAt: 0,
+        isExpanded: false,
+      }))
+    } catch { return [] }
+  })
+  React.useEffect(() => {
+    try {
+      const safe = rows.map((r) => ({
+        id: r.id,
+        url: r.url,
+        status: r.status,
+        extracted: r.extracted,
+        condo: r.condo,
+        projectUrl: r.projectUrl,
+        primaryUni: r.primaryUni,
+        savedPropertyId: r.savedPropertyId,
+        error: r.error,
+        lastEditedAt: r.lastEditedAt,
+      }))
+      window.localStorage.setItem(BATCH_KEY, JSON.stringify({ rows: safe }))
+    } catch { /* quota / private mode — ignore */ }
+  }, [rows])
+  const reset = React.useCallback(() => {
+    setRows([])
+    setUrlInput('')
+    try { window.localStorage.removeItem(BATCH_KEY) } catch {}
+  }, [])
+  return { rows, setRows, urlInput, setUrlInput, maxParallel, setMaxParallel, reset }
+}
+
 export default function App() {
   const [toastMsg, setToastMsg] = React.useState('')
   const [navOpen, setNavOpen] = React.useState(false)
@@ -89,6 +154,7 @@ export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const addDraft = useAddPropertyDraft()
+  const batchDraft = useBatchAddDraft()
 
   const linked = !!import.meta.env.VITE_CONVEX_URL
   const properties = useQuery('properties:list') ?? []
@@ -101,6 +167,7 @@ export default function App() {
   const counts = {
     add: '',
     'add-chat': '',
+    batch: batchDraft.rows.length || '',
     status: properties.length,
     recommend: responses.length,
     listings: properties.length,
@@ -216,6 +283,10 @@ export default function App() {
                 <Navigate to="/add" replace />
               )
             }
+          />
+          <Route
+            path="/add/batch"
+            element={<BatchAddProperty toast={toast} draft={batchDraft} />}
           />
           <Route path="/status" element={<StatusScreen toast={toast} properties={properties} />} />
           <Route

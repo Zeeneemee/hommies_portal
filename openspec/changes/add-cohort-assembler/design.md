@@ -2,7 +2,7 @@
 
 The portal now has two recommendation primitives:
 - `decide(resp, prop)` — scores one customer against one property (six factors, hard blockers, `groupContext` for pre-formed groups).
-- `pairFitForProperty(a, b, prop)` — scores two solo customers as potential housemates on one property (three factors, four blockers, returns `perPersonRent` and `notes[]`).
+- `pairFitForProperty(a, b, prop)` — scores two solo customers as potential housemates on one property (three factors, three blockers, returns `perPersonRent` and `notes[]`).
 
 Neither answers the operator's actual question for a whole-unit listing with multiple bedrooms: *"Which three (or four, or five) people from my pool should I propose to live in this unit together?"* That question requires:
 - A pool filter (only solo customers who opted in to roommates),

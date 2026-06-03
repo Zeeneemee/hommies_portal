@@ -324,11 +324,13 @@ export function pairFitForProperty(a, b, prop) {
   } else {
     const days = Math.abs((aDate.getTime() - bDate.getTime()) / 86400000)
     if (days > MOVEIN_BLOCKER_DAYS) {
-      blockers.push('movein_too_far')
+      // No blocker — move-in only contributes to the score, never gates the
+      // pair. Wide move-in gaps mean the lease will need to absorb whoever
+      // arrives later (or the cohort coordinates a single move-in date).
       crit.push({
         label: 'Move-in',
         level: 'fail',
-        detail: `${Math.round(days)}d apart — exceeds ${MOVEIN_BLOCKER_DAYS}d ceiling.`,
+        detail: `${Math.round(days)}d apart — no schedule alignment, but co-tenancy still viable.`,
       })
     } else if (days <= MOVEIN_SOFT_DAYS) {
       score += PAIR_WEIGHTS.movein
@@ -409,7 +411,6 @@ export function pairFitForProperty(a, b, prop) {
   if (blockers.includes('consent_missing')) reason = 'One side did not opt in to roommates.'
   else if (blockers.includes('budget_unaffordable')) reason = 'No room on this property fits both budgets.'
   else if (blockers.includes('lease_mismatch')) reason = `Lease lengths differ (${aLease}mo vs ${bLease}mo).`
-  else if (blockers.includes('movein_too_far')) reason = 'Move-in dates more than 30 days apart.'
   else if (finalScore === 100) reason = 'Strong fit — budget, commute, and schedule all aligned.'
   else reason = `Fit with caveats (${100 - finalScore} pts on soft signals).`
 

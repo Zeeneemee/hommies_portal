@@ -552,11 +552,13 @@ describe('pairFitForProperty — fixtures from the worked trace', () => {
     expect(r.perPersonRent['r-mei']).toEqual({ rent: 1800, roomKind: 'master' })
   })
 
-  it('Variant A — Wei moveIn 2026-06-01 → movein_too_far blocker', () => {
+  it('Variant A — Wei moveIn 2026-06-01 (>30d apart) → no blocker, move-in scores 0', () => {
     const weiEarly = { ...wei, moveIn: '2026-06-01' }
     const r = pairFitForProperty(weiEarly, mei, normantonPark)
-    expect(r.blockers).toContain('movein_too_far')
-    expect(r.verdict).toBe('unfit')
+    expect(r.blockers).not.toContain('movein_too_far')
+    expect(r.verdict).toBe('fit')
+    // Move-in contributes nothing → score drops by the full PAIR_WEIGHTS.movein (30).
+    expect(r.score).toBe(100 - PAIR_WEIGHTS.movein)
   })
 
   it('Variant B — lease 12 vs 6 → lease_mismatch blocker', () => {
@@ -795,10 +797,13 @@ describe('assembleCohort — failure modes', () => {
     expect(r).toEqual({ cohort: null, reason: 'cohort_incomplete' })
   })
 
-  it("no_fit_pair — every pair has movein_too_far blocker", () => {
-    const a = baseResp({ _id: 'a', moveIn: '2026-06-01' })
-    const b = baseResp({ _id: 'b', moveIn: '2026-08-01' })
-    const c = baseResp({ _id: 'c', moveIn: '2026-10-01' })
+  it("no_fit_pair — every pair has lease_mismatch blocker", () => {
+    // Three customers each with a distinct lease length → every pair is unfit
+    // on lease equality. (Move-in is no longer a hard gate, so we use lease
+    // length to engineer the all-unfit scenario.)
+    const a = baseResp({ _id: 'a', leaseLength: '12 months' })
+    const b = baseResp({ _id: 'b', leaseLength: '6 months' })
+    const c = baseResp({ _id: 'c', leaseLength: '24 months' })
     const r = assembleCohort(wholeUnit, [a, b, c])
     expect(r).toEqual({ cohort: null, reason: 'no_fit_pair' })
   })

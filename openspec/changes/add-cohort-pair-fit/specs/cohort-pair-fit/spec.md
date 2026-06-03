@@ -22,22 +22,22 @@ The function SHALL return `null` (not a decision) when ANY of the following hold
 
 ### Requirement: Hard blockers
 
-The decision SHALL include a `blockers: string[]` field. When at least one blocker is present, `verdict` SHALL be `'unfit'`. The four supported blockers are:
+The decision SHALL include a `blockers: string[]` field. When at least one blocker is present, `verdict` SHALL be `'unfit'`. The three supported blockers are:
 
 - `consent_missing` — at least one side has `wantRoommate === false`.
-- `movein_too_far` — `parseMoveInDate` succeeds on both sides AND the absolute difference exceeds 30 days.
 - `lease_mismatch` — `parseLeaseMonths` succeeds on both sides AND the integer-month values differ.
 - `budget_unaffordable` — at least one side has no room kind on the property within `budget.max + BUDGET_SOFT_OVERSHOOT` (S$200). Considers only room kinds the property actually has (i.e. requires `masterCount > 0` or `commonCount > 0` respectively).
 
-Unparseable `moveIn` or `leaseLength` on either side SHALL NOT trigger the corresponding blocker. Instead the function emits a soft criterion plus a `note` flagging the operator to verify.
+Move-in date alignment is NOT a hard gate — co-tenants can have different move-in dates (the cohort coordinates one lease-start date downstream). Move-in only contributes to the score (see "Three-factor weighted scoring"). Unparseable `leaseLength` on either side SHALL NOT trigger the `lease_mismatch` blocker; instead the function emits a soft criterion plus a `note` flagging the operator to verify.
 
 #### Scenario: Consent missing
 - **WHEN** `pairFitForProperty({ wantRoommate: false, ... }, b, prop)` is called
 - **THEN** `blockers` includes `'consent_missing'` and `verdict === 'unfit'`
 
-#### Scenario: Move-in dates 65 days apart
+#### Scenario: Move-in dates 65 days apart — no blocker
 - **WHEN** `a.moveIn = '2026-06-01'` and `b.moveIn = '2026-08-05'`
-- **THEN** `blockers` includes `'movein_too_far'`
+- **THEN** `blockers` does NOT include `'movein_too_far'` and `verdict === 'fit'` (assuming no other blocker)
+- **AND** the move-in factor contributes 0 points to the score
 
 #### Scenario: Lease lengths differ (12 vs 6)
 - **WHEN** both lease lengths parse but `parseLeaseMonths(a) === 12` and `parseLeaseMonths(b) === 6`
@@ -61,7 +61,7 @@ When no blocker fires, the decision SHALL include a `score` between 0 and 100 co
 
 - `budget`: weight 45. Pass (full points) when both sides have an affordable room on the property within their budget; soft (45% of weight) when at least one side fits only by overshooting their max by ≤ `BUDGET_SOFT_OVERSHOOT`.
 - `commute`: weight 25. Pass when both sides' commute on the property is within their `commuteTolMins`; soft (40% of weight) when the over-tolerance overshoot ≤ `COMMUTE_SOFT_OVER` (15 minutes) for at least one side.
-- `schedule — move-in`: weight 30. Pass when move-in dates are within 14 days; soft (40% of weight) when 14–30 days apart. Unparseable dates score as soft.
+- `schedule — move-in`: weight 30. Pass when move-in dates are within 14 days; soft (40% of weight) when 14–30 days apart; **0 points when more than 30 days apart (no blocker — co-tenants negotiate a single lease-start date)**. Unparseable dates score as soft.
 
 The `verdict` SHALL be `'fit'` when no blockers are present, regardless of score. Score is a quality signal; verdict is a feasibility signal.
 

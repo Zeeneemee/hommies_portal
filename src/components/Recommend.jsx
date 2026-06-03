@@ -6,6 +6,7 @@ import {
   draftMessage,
   parseGoogleFormCSV,
   decide,
+  assembleCohort,
 } from '../decisionLogic.js'
 import {
   partitionAssignmentsForProperty,
@@ -255,6 +256,9 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
       : matchable[0]?._id || null,
   )
   const [expanded, setExpanded] = React.useState({})
+  // Cohort assembly state — cleared when the selected property changes.
+  const [cohortResult, setCohortResult] = React.useState(null)
+  React.useEffect(() => { setCohortResult(null) }, [selectedId])
 
   React.useEffect(() => {
     if (initialPropertyId && matchable.find((p) => p._id === initialPropertyId)) {
@@ -368,7 +372,42 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
               />
               <Fact label="Layout" value={`${prop.unitType} · ${prop.housingType}`} />
             </div>
+            {prop.housingType === 'Whole Unit' &&
+              typeof prop.masterCount === 'number' &&
+              typeof prop.commonCount === 'number' &&
+              prop.masterCount + prop.commonCount > 0 && (
+                <div
+                  style={{
+                    padding: '12px 16px',
+                    borderTop: '1px solid var(--hairline)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 12,
+                  }}
+                >
+                  <div style={{ fontSize: 12, color: 'var(--ink-mute)' }}>
+                    Whole unit · {prop.masterCount}M + {prop.commonCount}C — fill it by matching{' '}
+                    {prop.masterCount + prop.commonCount} compatible solo customers as housemates.
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setCohortResult(assembleCohort(prop, responses))}
+                  >
+                    <Icon name="check" size={12} /> Suggest cohort
+                  </button>
+                </div>
+              )}
           </div>
+        )}
+
+        {cohortResult && prop && (
+          <CohortResultCard
+            result={cohortResult}
+            property={prop}
+            onDismiss={() => setCohortResult(null)}
+          />
         )}
 
         <AssignmentSection title="Must send" subtitle="Pinned — outreach not yet sent." count={buckets.pinned.length} kind="must-send">
@@ -784,6 +823,120 @@ function ScorePair({ pinnedScore, currentScore }) {
 }
 
 // Thousands-separator-aware S$ number formatter (no currency prefix — caller adds `S$`).
+// Friendly explanation for each cohort-assembly failure reason. Surfaced as the
+// banner copy when `assembleCohort` returns `cohort: null`.
+const COHORT_REASON_COPY = {
+  property_not_splittable: "This unit isn't set up for cohort matching — set master + common room counts in the listing editor.",
+  no_eligible_candidates: 'No customers in the pool opted in to roommates (wantRoommate=true).',
+  pool_too_small: 'Not enough opted-in solo customers to fill every bedroom.',
+  no_fit_pair: 'No two compatible customers in the pool — every pair is blocked on budget, consent, or lease length.',
+  cohort_incomplete: 'Found a starting pair but couldn’t extend to the full cohort — pool too thin or too divergent.',
+  no_valid_room_assignment: 'Compatible cohort found but no room assignment fits every member’s budget.',
+}
+
+function CohortResultCard({ result, property, onDismiss }) {
+  if (!result) return null
+
+  // Failure path — show the structured reason.
+  if (!result.cohort) {
+    return (
+      <div className="card" style={{ marginBottom: 18, borderLeft: '3px solid var(--warn, #b88500)' }}>
+        <div
+          className="card-pad"
+          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}
+        >
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
+              No cohort suggestion
+            </div>
+            <div style={{ fontSize: 13, color: 'var(--ink-mute)' }}>
+              {COHORT_REASON_COPY[result.reason] || `Assembly failed: ${result.reason}.`}
+            </div>
+          </div>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>
+            <Icon name="x" size={12} />
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Success path.
+  const { cohort, cohortScore, roomAssignments, notes, pairFits } = result
+  const target = (property.masterCount || 0) + (property.commonCount || 0)
+  const keyOf = (m, idx) => m?._id ?? `m${idx}`
+
+  return (
+    <div className="card" style={{ marginBottom: 18, borderLeft: '3px solid var(--navy, #041F60)' }}>
+      <div
+        className="card-pad"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}
+      >
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>
+            Suggested cohort · {cohort.length} of {target}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--ink-mute)', marginTop: 2 }}>
+            Cohort fit {cohortScore}/100 · rents conserve to S${formatSGD(property.rentSGD)}/mo
+          </div>
+        </div>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onDismiss}>
+          <Icon name="x" size={12} />
+        </button>
+      </div>
+      <div className="card-pad" style={{ paddingTop: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {cohort.map((m, idx) => {
+            const k = keyOf(m, idx)
+            const slot = roomAssignments[k]
+            return (
+              <div
+                key={k}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 12,
+                  padding: '8px 10px',
+                  background: 'var(--cream, #fff8ec)',
+                  borderRadius: 6,
+                  fontSize: 13,
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 600 }}>{m.name || 'Unnamed'}</div>
+                  <div style={{ fontSize: 11, color: 'var(--ink-mute)' }}>
+                    {m.school} · budget S${formatSGD(m.budget?.min)}–{formatSGD(m.budget?.max)} · {m.leaseLength || '—'}
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontWeight: 600 }}>
+                    S${formatSGD(slot?.rent)} <span style={{ fontWeight: 400, color: 'var(--ink-mute)' }}>{slot?.roomKind}</span>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        {pairFits && pairFits.length > 0 && (
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--ink-mute)' }}>
+            Pair-fits: {pairFits.map((p, i) => `${p.score}/100`).join(' · ')}
+          </div>
+        )}
+
+        {notes && notes.length > 0 && (
+          <ul style={{ marginTop: 12, paddingLeft: 18, fontSize: 12, color: 'var(--ink)' }}>
+            {notes.map((n, i) => (
+              <li key={i} style={{ marginBottom: 4 }}>{n}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const sgdFormatter = new Intl.NumberFormat('en-SG', { maximumFractionDigits: 0 })
 function formatSGD(n) {
   return typeof n === 'number' && Number.isFinite(n) ? sgdFormatter.format(n) : String(n ?? '')
