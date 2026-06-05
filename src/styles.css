@@ -1675,17 +1675,24 @@ video.listing-hero-img {
   flex-wrap: wrap;
   margin-top: 4px;
 }
-.customer-card-del {
+.customer-card-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.customer-card-icon-btn {
   background: transparent;
   border: 0;
   color: var(--ink-mute);
-  padding: 4px;
+  padding: 5px;
   border-radius: 6px;
   cursor: pointer;
   display: grid;
   place-items: center;
-  flex-shrink: 0;
+  transition: background 120ms ease, color 120ms ease;
 }
+.customer-card-icon-btn:hover { color: var(--navy); background: rgba(4,31,96,0.06); }
 .customer-card-del:hover { color: var(--danger); background: var(--danger-soft); }
 
 .customer-channel {
@@ -2031,6 +2038,27 @@ video.listing-hero-img {
   box-shadow: 0 0 0 4px var(--orange-soft);
 }
 .customer-hero-text { min-width: 0; flex: 1; }
+.customer-hero-eyebrow-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px;
+}
+.customer-hero-edit {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: #fff;
+  border: 1px solid var(--hairline-strong);
+  color: var(--ink);
+  padding: 6px 12px;
+  border-radius: 100px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+.customer-hero-edit:hover {
+  border-color: var(--orange);
+  color: var(--orange);
+  box-shadow: 0 0 0 3px rgba(253,105,37,0.12);
+}
 .customer-hero-name {
   font-family: var(--font-display);
   font-size: 32px;
@@ -2475,6 +2503,17 @@ video.listing-hero-img {
   padding: 8px 14px;
   font-size: 12px;
   border-top: 1px solid var(--green-soft);
+}
+.prop-mark-sent-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.prop-mark-sent-actions .prop-mark-action {
+  margin-top: 6px;
+  padding: 8px 14px;
+  font-size: 12px;
 }
 
 @media (max-width: 720px) {

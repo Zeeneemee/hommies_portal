@@ -1,23 +1,36 @@
 import React from 'react'
 import { Icon, Field, Segment } from './ui.jsx'
 
-// Used for walk-ins and DM enquiries that didn't go through the Google Form.
-export default function ManualResponseModal({ onClose, onSave }) {
-  const [r, setR] = React.useState({
-    name: '',
-    channel: 'WhatsApp',
-    contact: '',
-    school: 'NUS',
-    moveIn: '',
-    leaseLength: '12 months',
-    budget: { min: 1200, max: 1600 },
-    buildingType: 'Any',
-    housingType: 'Room',
-    unitLayout: ['Common Room'],
-    commuteTolMins: 25,
-    wantRoommate: true,
-    groupSize: undefined,
-    extras: { petFriendly: false, cookingAllowed: true, quiet: false, nearGym: false, note: '' },
+const EMPTY_RESPONSE = {
+  name: '',
+  channel: 'WhatsApp',
+  contact: '',
+  school: 'NUS',
+  moveIn: '',
+  leaseLength: '12 months',
+  budget: { min: 1200, max: 1600 },
+  buildingType: 'Any',
+  housingType: 'Room',
+  unitLayout: ['Common Room'],
+  commuteTolMins: 25,
+  wantRoommate: true,
+  groupSize: undefined,
+  extras: { petFriendly: false, cookingAllowed: true, quiet: false, nearGym: false, note: '' },
+}
+
+// Used for walk-ins and DM enquiries that didn't go through the Google Form,
+// and (with `initialValue`) for operator edits of an existing response.
+export default function ManualResponseModal({ onClose, onSave, initialValue }) {
+  const isEdit = Boolean(initialValue)
+  const [r, setR] = React.useState(() => {
+    if (!initialValue) return EMPTY_RESPONSE
+    return {
+      ...EMPTY_RESPONSE,
+      ...initialValue,
+      budget: { ...EMPTY_RESPONSE.budget, ...(initialValue.budget || {}) },
+      unitLayout: initialValue.unitLayout ?? EMPTY_RESPONSE.unitLayout,
+      extras: { ...EMPTY_RESPONSE.extras, ...(initialValue.extras || {}) },
+    }
   })
   const upd = (k, v) => setR((s) => ({ ...s, [k]: v }))
   const toggleLayout = (l) =>
@@ -48,8 +61,12 @@ export default function ManualResponseModal({ onClose, onSave }) {
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
         >
           <div>
-            <h3 className="card-title">Add response manually</h3>
-            <p className="card-sub">For walk-ins and DM enquiries that didn't go through the Google Form.</p>
+            <h3 className="card-title">{isEdit ? 'Edit customer' : 'Add response manually'}</h3>
+            <p className="card-sub">
+              {isEdit
+                ? 'Update the captured details. Source and timestamps are preserved.'
+                : "For walk-ins and DM enquiries that didn't go through the Google Form."}
+            </p>
           </div>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>
             <Icon name="x" size={14} />
@@ -179,10 +196,31 @@ export default function ManualResponseModal({ onClose, onSave }) {
           </button>
           <button
             className="btn btn-primary"
-            onClick={() => onSave({ ...r, source: 'manual' })}
+            onClick={() => {
+              // Pass back only form-managed fields so Convex internals
+              // (_id, _creationTime, createdAt, sheetTimestamp) don't leak
+              // into add() or update() args.
+              const payload = {
+                name: r.name,
+                channel: r.channel,
+                contact: r.contact,
+                school: r.school,
+                moveIn: r.moveIn,
+                leaseLength: r.leaseLength,
+                budget: r.budget,
+                buildingType: r.buildingType,
+                housingType: r.housingType,
+                unitLayout: r.unitLayout,
+                commuteTolMins: r.commuteTolMins,
+                wantRoommate: r.wantRoommate,
+                groupSize: r.groupSize,
+                extras: r.extras,
+              }
+              onSave(isEdit ? payload : { ...payload, source: 'manual' })
+            }}
             disabled={!r.name}
           >
-            Save response
+            {isEdit ? 'Save changes' : 'Save response'}
           </button>
         </div>
       </div>

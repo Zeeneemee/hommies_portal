@@ -2,6 +2,7 @@ import React from 'react'
 import { useMutation, useQuery } from 'convex/react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Icon, Pill } from './ui.jsx'
+import ManualResponseModal from './ManualResponseModal.jsx'
 
 // Screen 5b — per-customer detail page. Reached by clicking a card on
 // /customers. Lists every property as a card; the operator marks which ones
@@ -14,17 +15,22 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
   const { id } = useParams()
   const navigate = useNavigate()
   const assignments = useQuery('assignments:list', { responseId: id }) ?? []
-  const sales = useQuery('sales:byResponse', { responseId: id }) ?? []
+  const deals = useQuery('deals:byResponse', { responseId: id }) ?? []
   const pin = useMutation('assignments:pin')
   const markSent = useMutation('assignments:markSent')
-  const closeSale = useMutation('sales:close')
-  const uncloseSale = useMutation('sales:unclose')
+  const undoSent = useMutation('assignments:undoSent')
+  const startDeal = useMutation('deals:start')
+  const advanceDeal = useMutation('deals:advance')
+  const cancelDeal = useMutation('deals:cancel')
+  const setFinalRent = useMutation('deals:setFinalRent')
+  const updateResponse = useMutation('responses:update')
 
   const response = responses.find((r) => r._id === id)
 
   const [search, setSearch] = React.useState('')
   const [hideSent, setHideSent] = React.useState(false)
   const [busyId, setBusyId] = React.useState(null)
+  const [editingCustomer, setEditingCustomer] = React.useState(false)
 
   // Build a lookup of this customer's active assignments by propertyId.
   const activeByProp = React.useMemo(() => {
@@ -36,39 +42,42 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
     return m
   }, [assignments])
 
-  // Active closed-sale lookup by propertyId — overrides 'sent' state.
-  const saleByProp = React.useMemo(() => {
+  // Active deal lookup by propertyId — a moved-in deal overrides 'sent';
+  // any other active stage decorates the row as 'deal'.
+  const dealByProp = React.useMemo(() => {
     const m = new Map()
-    for (const s of sales) {
-      if (s.unclosedAt !== undefined) continue
-      m.set(s.propertyId, s)
+    for (const d of deals) {
+      if (d.cancelledAt !== undefined) continue
+      m.set(d.propertyId, d)
     }
     return m
-  }, [sales])
+  }, [deals])
 
   const decorated = React.useMemo(() => {
     const q = search.trim().toLowerCase()
     const list = properties
       .map((p) => {
-        const sale = saleByProp.get(p._id)
+        const deal = dealByProp.get(p._id)
         const a = activeByProp.get(p._id)
-        const state = sale ? 'closed' : a ? a.status : 'idle'
-        return { property: p, assignment: a, sale, state }
+        let state = 'idle'
+        if (deal?.stage === 'moved_in') state = 'closed'
+        else if (deal) state = 'deal'
+        else if (a) state = a.status
+        return { property: p, assignment: a, deal, state }
       })
       .filter(({ property, state }) => {
-        if (hideSent && (state === 'sent' || state === 'closed')) return false
+        if (hideSent && (state === 'sent' || state === 'closed' || state === 'deal')) return false
         if (q && !(property.condo || '').toLowerCase().includes(q)) return false
         return true
       })
-    // Closed first (the win), then sent, queued, idle.
-    // Within each, sort by condo name for predictability.
-    const rank = { closed: -1, sent: 0, pinned: 1, idle: 2 }
+    // Closed first (the win), then in-deal, sent, queued, idle.
+    const rank = { closed: -1, deal: 0, sent: 1, pinned: 2, idle: 3 }
     return list.sort((a, b) => {
       const r = rank[a.state] - rank[b.state]
       if (r !== 0) return r
       return (a.property.condo || '').localeCompare(b.property.condo || '')
     })
-  }, [properties, activeByProp, saleByProp, search, hideSent])
+  }, [properties, activeByProp, dealByProp, search, hideSent])
 
   const counts = React.useMemo(() => {
     let sent = 0
@@ -78,9 +87,10 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
       if (a.status === 'sent') sent += 1
       else if (a.status === 'pinned') queued += 1
     }
-    const closed = Array.from(saleByProp.values()).length
+    let closed = 0
+    for (const d of dealByProp.values()) if (d.stage === 'moved_in') closed += 1
     return { sent, queued, closed, total: properties.length }
-  }, [assignments, saleByProp, properties])
+  }, [assignments, dealByProp, properties])
 
   if (!response) {
     return (
@@ -121,11 +131,22 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
   async function handleCloseSale(property, finalRentSGD) {
     setBusyId(property._id)
     try {
-      await closeSale({
-        responseId: response._id,
-        propertyId: property._id,
-        finalRentSGD: Number.isFinite(finalRentSGD) ? finalRentSGD : undefined,
-      })
+      // Start (or reuse) the deal and skip straight to moved_in. Final rent
+      // is stamped separately so the operator can capture it at close-time.
+      const existingDeal = dealByProp.get(property._id)
+      let dealId = existingDeal?._id
+      if (!dealId) {
+        dealId = await startDeal({
+          responseId: response._id,
+          propertyId: property._id,
+        })
+      }
+      if (existingDeal?.stage !== 'moved_in') {
+        await advanceDeal({ id: dealId, to: 'moved_in' })
+      }
+      if (Number.isFinite(finalRentSGD)) {
+        await setFinalRent({ id: dealId, finalRentSGD })
+      }
       toast?.(`Closed — ${property.condo} → ${response.name}.`)
     } catch (err) {
       toast?.(`Couldn't close — ${err?.message || 'try again'}.`)
@@ -134,13 +155,28 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
     }
   }
 
-  async function handleUnclose(sale, property) {
+  async function handleUndoSent(property, existing) {
+    if (!existing?._id) return
     setBusyId(property._id)
     try {
-      await uncloseSale({ id: sale._id })
-      toast?.(`Reopened — ${property.condo} is back to sent.`)
+      await undoSent({ id: existing._id })
+      toast?.(`${property.condo} reverted to queued.`)
     } catch (err) {
-      toast?.(`Couldn't reopen — ${err?.message || 'try again'}.`)
+      toast?.(`Couldn't undo sent — ${err?.message || 'try again'}.`)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  async function handleUnclose(deal, property) {
+    setBusyId(property._id)
+    try {
+      // Backward stage transitions aren't allowed; cancel the moved-in deal
+      // instead. The customer drops back to Sent in the pipeline.
+      await cancelDeal({ id: deal._id })
+      toast?.(`Cancelled — ${property.condo} is back to sent.`)
+    } catch (err) {
+      toast?.(`Couldn't cancel — ${err?.message || 'try again'}.`)
     } finally {
       setBusyId(null)
     }
@@ -150,7 +186,11 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
     <div className="customer-detail">
       <BackLink onClick={() => navigate('/customers')} />
 
-      <CustomerHero response={response} counts={counts} />
+      <CustomerHero
+        response={response}
+        counts={counts}
+        onEdit={() => setEditingCustomer(true)}
+      />
 
       <div className="detail-toolbar">
         <div className="detail-toolbar-title">
@@ -189,21 +229,38 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
         </div>
       ) : (
         <div className="detail-properties-grid">
-          {decorated.map(({ property, assignment, sale, state }) => (
+          {decorated.map(({ property, assignment, deal, state }) => (
             <PropertyMarkCard
               key={property._id}
               property={property}
               assignment={assignment}
-              sale={sale}
+              deal={deal}
               state={state}
               busy={busyId === property._id}
               schoolKey={SCHOOLS_TO_COMMUTE_KEY[response.school]}
               onMarkSent={() => handleMarkSent(property, assignment)}
+              onUndoSent={() => handleUndoSent(property, assignment)}
               onCloseSale={(rent) => handleCloseSale(property, rent)}
-              onUnclose={() => sale && handleUnclose(sale, property)}
+              onUnclose={() => deal && handleUnclose(deal, property)}
             />
           ))}
         </div>
+      )}
+
+      {editingCustomer && (
+        <ManualResponseModal
+          initialValue={response}
+          onClose={() => setEditingCustomer(false)}
+          onSave={async (patch) => {
+            try {
+              await updateResponse({ id: response._id, patch })
+              toast?.(`${patch.name} updated.`)
+              setEditingCustomer(false)
+            } catch (err) {
+              toast?.(`Update failed: ${err.message || err}`)
+            }
+          }}
+        />
       )}
     </div>
   )
@@ -218,7 +275,7 @@ function BackLink({ onClick }) {
   )
 }
 
-function CustomerHero({ response: r, counts }) {
+function CustomerHero({ response: r, counts, onEdit }) {
   const sourceLabel = r.source || 'manual'
   return (
     <div className="customer-hero">
@@ -227,7 +284,23 @@ function CustomerHero({ response: r, counts }) {
           {initials(r.name)}
         </div>
         <div className="customer-hero-text">
-          <div className="eyebrow">Customer</div>
+          <div className="customer-hero-eyebrow-row">
+            <div className="eyebrow">Customer</div>
+            {onEdit && (
+              <button
+                type="button"
+                className="customer-hero-edit"
+                onClick={onEdit}
+                aria-label={`Edit ${r.name}`}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                </svg>
+                <span>Edit</span>
+              </button>
+            )}
+          </div>
           <h1 className="customer-hero-name">{r.name}</h1>
           <div className="customer-hero-pills">
             <Pill kind={r.school === 'NUS' ? 'orange' : r.school === 'OTHER' ? 'grey' : 'navy'} dot>
@@ -294,11 +367,13 @@ function HeroCount({ label, value, kind }) {
   )
 }
 
-function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKey, onMarkSent, onCloseSale, onUnclose }) {
+function PropertyMarkCard({ property: p, assignment, deal, state, busy, schoolKey, onMarkSent, onUndoSent, onCloseSale, onUnclose }) {
   const commute = p.commuteMins?.[schoolKey]
   const isSent = state === 'sent'
   const isQueued = state === 'pinned'
   const isClosed = state === 'closed'
+  const isInDeal = state === 'deal'
+  const DEAL_LABELS = { loi_sent: 'LOI sent', loi_signed: 'LOI signed', ta_issued: 'TA issued' }
   const hero = p.images?.[0]
   const photoCount = p.images?.length || 0
   const [showCloseForm, setShowCloseForm] = React.useState(false)
@@ -349,6 +424,11 @@ function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKe
             Queued
           </span>
         )}
+        {isInDeal && deal && (
+          <span className="prop-mark-card-hero-badge prop-mark-card-hero-badge--sent">
+            <Icon name="send" size={10} /> {DEAL_LABELS[deal.stage] || deal.stage}
+          </span>
+        )}
       </div>
       <div className="prop-mark-card-top">
         <div className="prop-mark-card-titles">
@@ -382,7 +462,7 @@ function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKe
         </div>
       </div>
 
-      {!isSent && !isClosed && (
+      {!isSent && !isClosed && !isInDeal && (
         <button
           type="button"
           className={`prop-mark-action ${isQueued ? 'prop-mark-action--queued' : ''}`}
@@ -399,6 +479,14 @@ function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKe
           )}
         </button>
       )}
+      {isInDeal && deal && (
+        <div className="prop-mark-sent-meta">
+          <span>
+            Deal at {DEAL_LABELS[deal.stage] || deal.stage} — advance from{' '}
+            <strong>Pipeline</strong>.
+          </span>
+        </div>
+      )}
       {isSent && !showCloseForm && (
         <div className="prop-mark-sent-meta">
           {assignment?.sentAt && (
@@ -409,15 +497,26 @@ function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKe
               )}
             </span>
           )}
-          <button
-            type="button"
-            className="prop-mark-action prop-mark-action--close"
-            onClick={() => setShowCloseForm(true)}
-            disabled={busy}
-          >
-            <Icon name="check" size={12} />
-            <span>Mark closed</span>
-          </button>
+          <div className="prop-mark-sent-actions">
+            <button
+              type="button"
+              className="prop-mark-action prop-mark-action--ghost"
+              onClick={onUndoSent}
+              disabled={busy}
+              title="Revert to queued — clears sentAt/sentVia"
+            >
+              {busy ? 'Saving…' : 'Undo sent'}
+            </button>
+            <button
+              type="button"
+              className="prop-mark-action prop-mark-action--close"
+              onClick={() => setShowCloseForm(true)}
+              disabled={busy}
+            >
+              <Icon name="check" size={12} />
+              <span>Mark closed</span>
+            </button>
+          </div>
         </div>
       )}
       {isSent && showCloseForm && (
@@ -451,12 +550,12 @@ function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKe
       {isClosed && (
         <div className="prop-mark-closed-meta">
           <div>
-            <span className="fact-label">Closed</span>
+            <span className="fact-label">Moved in</span>
             <span className="prop-mark-closed-val">
-              {sale?.closedAt ? fmtShortDate(sale.closedAt) : '—'}
-              {typeof sale?.finalRentSGD === 'number' && (
+              {deal?.movedInAt ? fmtShortDate(deal.movedInAt) : '—'}
+              {typeof deal?.finalRentSGD === 'number' && (
                 <span className="muted-suffix">
-                  {' · '}S${sale.finalRentSGD.toLocaleString()}/mo
+                  {' · '}S${deal.finalRentSGD.toLocaleString()}/mo
                 </span>
               )}
             </span>
@@ -467,7 +566,7 @@ function PropertyMarkCard({ property: p, assignment, sale, state, busy, schoolKe
             onClick={onUnclose}
             disabled={busy}
           >
-            {busy ? 'Saving…' : 'Undo close'}
+            {busy ? 'Saving…' : 'Cancel deal'}
           </button>
         </div>
       )}

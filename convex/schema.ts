@@ -140,10 +140,10 @@ export default defineSchema({
     .index('by_response', ['responseId'])
     .index('by_status', ['status']),
 
-  // Closed deals — one row per (customer, property) sale. Created from the
-  // customer detail page once a sent property turns into a signed lease.
-  // unclosedAt is a tombstone so the operator can undo a mistaken close
-  // without losing the historical record.
+  // Legacy closed-deal ledger — superseded by `deals`. Kept in the schema so
+  // the one-shot migration (`deals:migrateFromSales`) can read from it. Once
+  // the migration has been run and verified, this table and `convex/sales.ts`
+  // can be removed.
   sales: defineTable({
     responseId: v.id('responses'),
     propertyId: v.id('properties'),
@@ -154,4 +154,30 @@ export default defineSchema({
     .index('by_property', ['propertyId'])
     .index('by_response', ['responseId'])
     .index('by_closedAt', ['closedAt']),
+
+  // Leasing-journey ledger. One row per (customer, property) deal that has
+  // started moving from listing-sent into the formal leasing flow. A customer
+  // may have at most one active (`!cancelledAt`) row at a time. Stage advances
+  // are strictly forward — `loi_sent → loi_signed → ta_issued → moved_in`.
+  // Skipping forward is allowed; backward transitions are not (use `cancel`
+  // and restart instead). `cancelledAt` is a tombstone, not a delete.
+  deals: defineTable({
+    responseId: v.id('responses'),
+    propertyId: v.id('properties'),
+    stage: v.union(
+      v.literal('loi_sent'),
+      v.literal('loi_signed'),
+      v.literal('ta_issued'),
+      v.literal('moved_in'),
+    ),
+    loiSentAt: v.optional(v.number()),
+    loiSignedAt: v.optional(v.number()),
+    taIssuedAt: v.optional(v.number()),
+    movedInAt: v.optional(v.number()),
+    finalRentSGD: v.optional(v.number()),
+    cancelledAt: v.optional(v.number()),
+  })
+    .index('by_property', ['propertyId'])
+    .index('by_response', ['responseId'])
+    .index('by_stage', ['stage']),
 })

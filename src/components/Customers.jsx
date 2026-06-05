@@ -71,8 +71,11 @@ export default function CustomersScreen({ toast, responses, properties = [] }) {
   const navigate = useNavigate()
   const addResponse = useMutation('responses:add')
   const removeResponse = useMutation('responses:remove')
+  const updateResponse = useMutation('responses:update')
   const assignments = useQuery('assignments:list', {}) ?? []
   const [showAdd, setShowAdd] = React.useState(false)
+  const [editingId, setEditingId] = React.useState(null)
+  const editing = editingId ? responses.find((r) => r._id === editingId) : null
   const [school, setSchool] = React.useState('All')
   const [source, setSource] = React.useState('All')
   const [search, setSearch] = React.useState('')
@@ -347,6 +350,10 @@ export default function CustomersScreen({ toast, responses, properties = [] }) {
               response={r}
               engagement={engagementFor(r._id, assignments)}
               onOpen={() => navigate(`/customers/${r._id}`)}
+              onEdit={(e) => {
+                e.stopPropagation()
+                setEditingId(r._id)
+              }}
               onDelete={(e) => handleDelete(r, e)}
             />
           ))}
@@ -360,6 +367,22 @@ export default function CustomersScreen({ toast, responses, properties = [] }) {
             await addResponse(r)
             toast?.(`${r.name} added.`)
             setShowAdd(false)
+          }}
+        />
+      )}
+
+      {editing && (
+        <ManualResponseForm
+          initialValue={editing}
+          onClose={() => setEditingId(null)}
+          onSave={async (patch) => {
+            try {
+              await updateResponse({ id: editing._id, patch })
+              toast?.(`${patch.name} updated.`)
+              setEditingId(null)
+            } catch (err) {
+              toast?.(`Update failed: ${err.message || err}`)
+            }
           }}
         />
       )}
@@ -418,7 +441,7 @@ function fmtDate(d) {
   return new Date(t).toLocaleDateString('en-SG', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-function CustomerCard({ response: r, engagement, onOpen, onDelete }) {
+function CustomerCard({ response: r, engagement, onOpen, onEdit, onDelete }) {
   const ext = r.extras || {}
   const flags = []
   if (ext.petFriendly) flags.push('pet')
@@ -456,15 +479,29 @@ function CustomerCard({ response: r, engagement, onOpen, onDelete }) {
             <Pill kind={sourceKind}>{sourceLabel}</Pill>
           </div>
         </div>
-        <button
-          type="button"
-          className="customer-card-del"
-          onClick={onDelete}
-          aria-label={`Remove ${r.name}`}
-          title="Remove from database"
-        >
-          <Icon name="trash" size={14} />
-        </button>
+        <div className="customer-card-actions" onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="customer-card-icon-btn"
+            onClick={onEdit}
+            aria-label={`Edit ${r.name}`}
+            title="Edit customer"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 20h9" />
+              <path d="M16.5 3.5a2.121 2.121 0 1 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="customer-card-icon-btn customer-card-del"
+            onClick={onDelete}
+            aria-label={`Remove ${r.name}`}
+            title="Remove from database"
+          >
+            <Icon name="trash" size={14} />
+          </button>
+        </div>
       </div>
 
       <div className="customer-channel">

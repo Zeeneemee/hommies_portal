@@ -117,11 +117,12 @@ Return ONLY a JSON object — no prose, no markdown fences, no commentary. Use t
   "unitType": "Common Room" | "Master Room" | "Studio" | "Whole Unit",
   "fullAddress": string,                   // full street address if shown
   "commuteMins": { "NUS": number, "NTU": number, "SMU": number },  // all three required as integers; omit the whole object if any is missing
+  "bedrooms": number,                      // total bedroom count for whole-unit listings. Used by the sanitiser to infer master/common when the poster doesn't name them explicitly. Omit for room rentals.
   "masterCount": number,                   // number of master bedrooms (whole-unit listings only). Omit if poster does not say.
   "commonCount": number                    // number of common bedrooms (whole-unit listings only). Omit if poster does not say.
 }
 
-Strip "~" from approximate commute values. Strip currency symbols and commas from rent. For whole-unit listings, count master and common bedrooms separately — only include masterCount/commonCount when the poster names them; do not infer from a generic "3-bedroom" label.`
+Strip "~" from approximate commute values. Strip currency symbols and commas from rent. For whole-unit listings, count master and common bedrooms separately when the poster names them — otherwise return just "bedrooms" and the system will fall back to the SG convention (1 master + remainder common).`
 
   try {
     const response = await ai.models.generateContent({
@@ -677,7 +678,15 @@ export const extractPosterDetails = action({
       posterExtractionOk: Object.keys(fields).length > 0,
     }
     if (usedGemini) patch.posterExtractionRaw = `${patch.posterExtractionRaw}\n\n[gemini] ${geminiNote || '(no note)'}`
-    for (const [k, v] of Object.entries(fields)) if (v !== undefined) patch[k] = v
+    // Fields the sanitiser uses internally to fire the master/common
+    // fallback but the `properties` schema doesn't persist. Strip them so
+    // `properties:update`'s validator doesn't reject the whole patch.
+    const EPHEMERAL_FIELDS = new Set(['bedrooms', 'bathrooms'])
+    for (const [k, v] of Object.entries(fields)) {
+      if (v === undefined) continue
+      if (EPHEMERAL_FIELDS.has(k)) continue
+      patch[k] = v
+    }
 
     await ctx.runMutation(internal.properties.update, { id, patch: patch as any })
 

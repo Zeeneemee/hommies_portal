@@ -3,41 +3,49 @@ import { useMutation } from 'convex/react'
 import { useNavigate } from 'react-router-dom'
 import { Icon, Pill } from './ui.jsx'
 
-// Screen 6 — Sales ledger. Read-only summary of closed deals. The close
-// action lives on the customer detail page (one click on a sent property);
-// this screen lists what's been closed, with revenue + an undo for accidents.
+// Screen 7 — Sales ledger. Read-only summary of moved-in deals (the final
+// stage in the leasing journey). Pipeline drives the stage progression; this
+// screen lists what's been closed, with revenue + an undo for accidents.
+//
+// Backed by the `deals` table — a "closed" deal is `stage === 'moved_in'`
+// with no `cancelledAt`. Reopen = `deals:advance` is forbidden backward, so
+// instead we cancel the moved-in deal (drops customer back to Sent).
 
-export default function SalesScreen({ toast, sales = [] }) {
+export default function SalesScreen({ toast, deals = [] }) {
   const navigate = useNavigate()
-  const uncloseSale = useMutation('sales:unclose')
+  const cancelDeal = useMutation('deals:cancel')
   const [busyId, setBusyId] = React.useState(null)
   const [showClosed, setShowClosed] = React.useState(false)
   const [search, setSearch] = React.useState('')
 
-  const active = sales.filter((s) => s.unclosedAt === undefined)
-  const reopened = sales.filter((s) => s.unclosedAt !== undefined)
+  const movedIn = deals.filter(
+    (d) => d.stage === 'moved_in' && d.cancelledAt === undefined,
+  )
+  const reopened = deals.filter(
+    (d) => d.stage === 'moved_in' && d.cancelledAt !== undefined,
+  )
 
-  const totalActiveRent = active.reduce(
-    (acc, s) => acc + (typeof s.finalRentSGD === 'number' ? s.finalRentSGD : 0),
+  const totalActiveRent = movedIn.reduce(
+    (acc, d) => acc + (typeof d.finalRentSGD === 'number' ? d.finalRentSGD : 0),
     0,
   )
 
   const q = search.trim().toLowerCase()
-  const matches = (s) =>
+  const matches = (d) =>
     !q ||
-    s.customerName?.toLowerCase().includes(q) ||
-    s.propertyCondo?.toLowerCase().includes(q)
+    d.customerName?.toLowerCase().includes(q) ||
+    d.propertyCondo?.toLowerCase().includes(q)
 
-  const visibleActive = active.filter(matches)
+  const visibleActive = movedIn.filter(matches)
   const visibleReopened = reopened.filter(matches)
 
-  async function handleUnclose(sale) {
-    setBusyId(sale._id)
+  async function handleCancel(deal) {
+    setBusyId(deal._id)
     try {
-      await uncloseSale({ id: sale._id })
-      toast?.(`Reopened — ${sale.propertyCondo} → ${sale.customerName}.`)
+      await cancelDeal({ id: deal._id })
+      toast?.(`Cancelled — ${deal.propertyCondo} → ${deal.customerName}.`)
     } catch (err) {
-      toast?.(`Couldn't reopen — ${err?.message || 'try again'}.`)
+      toast?.(`Couldn't cancel — ${err?.message || 'try again'}.`)
     } finally {
       setBusyId(null)
     }
@@ -47,14 +55,14 @@ export default function SalesScreen({ toast, sales = [] }) {
     <div className="sales-screen">
       <div className="page-head">
         <div>
-          <div className="eyebrow">Step 6</div>
+          <div className="eyebrow">Sales</div>
           <h1 className="page-title">Sales</h1>
           <p className="muted">
-            Closed deals — every confirmed lease maps a customer to the property they took.
+            Closed deals — every moved-in lease, plus the running monthly rent.
           </p>
         </div>
         <div className="sales-stats">
-          <Stat label="Closed" value={active.length} kind="closed" />
+          <Stat label="Moved in" value={movedIn.length} kind="closed" />
           <Stat
             label="Monthly rent"
             value={totalActiveRent > 0 ? `S$${totalActiveRent.toLocaleString()}` : '—'}
@@ -77,7 +85,7 @@ export default function SalesScreen({ toast, sales = [] }) {
               checked={showClosed}
               onChange={(e) => setShowClosed(e.target.checked)}
             />
-            <span>Show reopened</span>
+            <span>Show cancelled</span>
           </label>
         </div>
       </div>
@@ -86,19 +94,18 @@ export default function SalesScreen({ toast, sales = [] }) {
         <div className="empty" style={{ marginTop: 16 }}>
           <h4>No closed deals yet</h4>
           <p>
-            From a customer's detail page, click <strong>Mark closed</strong> on a sent
-            property to log the deal here.
+            Advance a deal to <strong>Moved in</strong> on the Pipeline screen to log it here.
           </p>
         </div>
       ) : (
         <div className="sales-grid">
-          {visibleActive.map((s) => (
-            <SaleCard
-              key={s._id}
-              sale={s}
-              busy={busyId === s._id}
-              onUnclose={() => handleUnclose(s)}
-              onOpenCustomer={() => navigate(`/customers/${s.responseId}`)}
+          {visibleActive.map((d) => (
+            <DealCard
+              key={d._id}
+              deal={d}
+              busy={busyId === d._id}
+              onCancel={() => handleCancel(d)}
+              onOpenCustomer={() => navigate(`/customers/${d.responseId}`)}
             />
           ))}
         </div>
@@ -106,14 +113,14 @@ export default function SalesScreen({ toast, sales = [] }) {
 
       {showClosed && visibleReopened.length > 0 && (
         <div style={{ marginTop: 24 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>Reopened</div>
+          <div className="eyebrow" style={{ marginBottom: 8 }}>Cancelled</div>
           <div className="sales-grid">
-            {visibleReopened.map((s) => (
-              <SaleCard
-                key={s._id}
-                sale={s}
-                reopened
-                onOpenCustomer={() => navigate(`/customers/${s.responseId}`)}
+            {visibleReopened.map((d) => (
+              <DealCard
+                key={d._id}
+                deal={d}
+                cancelled
+                onOpenCustomer={() => navigate(`/customers/${d.responseId}`)}
               />
             ))}
           </div>
@@ -132,31 +139,28 @@ function Stat({ label, value, kind }) {
   )
 }
 
-function SaleCard({ sale, busy, reopened, onUnclose, onOpenCustomer }) {
+function DealCard({ deal, busy, cancelled, onCancel, onOpenCustomer }) {
   return (
-    <div className={`sale-card ${reopened ? 'sale-card--reopened' : ''}`}>
+    <div className={`sale-card ${cancelled ? 'sale-card--reopened' : ''}`}>
       <div className="sale-card-head">
         <div>
           <div className="eyebrow">Customer</div>
           <button type="button" className="sale-card-link" onClick={onOpenCustomer}>
-            {sale.customerName}
+            {deal.customerName}
           </button>
-          {sale.customerSchool && (
+          {deal.customerSchool && (
             <span style={{ marginLeft: 8 }}>
-              <Pill
-                kind={sale.customerSchool === 'NUS' ? 'orange' : 'navy'}
-                dot
-              >
-                {sale.customerSchool}
+              <Pill kind={deal.customerSchool === 'NUS' ? 'orange' : 'navy'} dot>
+                {deal.customerSchool}
               </Pill>
             </span>
           )}
         </div>
-        {reopened ? (
-          <span className="prop-mark-badge prop-mark-badge--queued">Reopened</span>
+        {cancelled ? (
+          <span className="prop-mark-badge prop-mark-badge--queued">Cancelled</span>
         ) : (
           <span className="prop-mark-badge prop-mark-badge--sent">
-            <Icon name="check" size={11} /> Closed
+            <Icon name="check" size={11} /> Moved in
           </span>
         )}
       </div>
@@ -164,35 +168,35 @@ function SaleCard({ sale, busy, reopened, onUnclose, onOpenCustomer }) {
       <div className="sale-card-body">
         <div>
           <div className="fact-label">Property</div>
-          <div className="fact-val">{sale.propertyCondo}</div>
+          <div className="fact-val">{deal.propertyCondo}</div>
           <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
-            {[sale.propertyBuildingType, sale.propertyArea].filter(Boolean).join(' · ') || '—'}
+            {[deal.propertyBuildingType, deal.propertyArea].filter(Boolean).join(' · ') || '—'}
           </div>
         </div>
         <div>
           <div className="fact-label">Final rent</div>
           <div className="fact-val">
-            {typeof sale.finalRentSGD === 'number'
-              ? `S$${sale.finalRentSGD.toLocaleString()}`
+            {typeof deal.finalRentSGD === 'number'
+              ? `S$${deal.finalRentSGD.toLocaleString()}`
               : '—'}
             <span className="muted-suffix"> /mo</span>
           </div>
         </div>
         <div>
-          <div className="fact-label">Closed</div>
-          <div className="fact-val">{fmtDate(sale.closedAt)}</div>
+          <div className="fact-label">Moved in</div>
+          <div className="fact-val">{fmtDate(deal.movedInAt)}</div>
         </div>
       </div>
 
-      {!reopened && (
+      {!cancelled && (
         <button
           type="button"
           className="prop-mark-action prop-mark-action--ghost"
-          onClick={onUnclose}
+          onClick={onCancel}
           disabled={busy}
           style={{ alignSelf: 'flex-end' }}
         >
-          {busy ? 'Saving…' : 'Undo close'}
+          {busy ? 'Saving…' : 'Cancel deal'}
         </button>
       )}
     </div>

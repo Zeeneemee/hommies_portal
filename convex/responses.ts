@@ -35,6 +35,119 @@ export const list = query({
     ctx.db.query('responses').withIndex('by_createdAt').order('desc').collect(),
 })
 
+// One-shot pipeline join — returns every response with its computed funnel
+// stage plus the cached numbers / linked-property pointers the Pipeline screen
+// needs to render a row without follow-up queries. Stage priority:
+//   moved_in > ta_issued > loi_signed > loi_sent > sent > not_contacted
+// Cancelled deals don't contribute; the customer falls back to `sent` if any
+// sent assignment exists, otherwise `not_contacted`.
+export const listWithPipelineStatus = query({
+  args: {},
+  handler: async (ctx) => {
+    const [responses, assignments, deals] = await Promise.all([
+      ctx.db.query('responses').withIndex('by_createdAt').order('desc').collect(),
+      ctx.db.query('assignments').collect(),
+      ctx.db.query('deals').collect(),
+    ])
+
+    // Aggregate assignment + deal state per response in one pass each.
+    const sentByResponse = new Map<
+      string,
+      { count: number; lastSentAt: number; lastSentPropertyId: Id<'properties'> | null }
+    >()
+    for (const a of assignments) {
+      if (a.status !== 'sent') continue
+      if (a.unpinnedAt !== undefined) continue
+      const at = a.sentAt ?? 0
+      const cur = sentByResponse.get(a.responseId)
+      if (!cur) {
+        sentByResponse.set(a.responseId, {
+          count: 1,
+          lastSentAt: at,
+          lastSentPropertyId: a.propertyId,
+        })
+      } else {
+        cur.count += 1
+        if (at > cur.lastSentAt) {
+          cur.lastSentAt = at
+          cur.lastSentPropertyId = a.propertyId
+        }
+      }
+    }
+
+    const activeDealByResponse = new Map<string, typeof deals[number]>()
+    const movedInByResponse = new Map<string, typeof deals[number]>()
+    for (const d of deals) {
+      if (d.cancelledAt !== undefined) continue
+      // A customer has at most one active deal (enforced by deals:start), so
+      // first-write-wins is safe. We also separately track any moved_in deal
+      // because that wins regardless of whether there's a parallel active row
+      // from a botched migration.
+      if (d.stage === 'moved_in') {
+        movedInByResponse.set(d.responseId, d)
+      }
+      if (!activeDealByResponse.has(d.responseId)) {
+        activeDealByResponse.set(d.responseId, d)
+      }
+    }
+
+    // Build a tiny propertyId → condo lookup so the row meta can render the
+    // linked property's name without the client doing a second query.
+    const propertyIds = new Set<string>()
+    for (const a of assignments) propertyIds.add(a.propertyId)
+    for (const d of deals) propertyIds.add(d.propertyId)
+    const propertyNames = new Map<string, string>()
+    for (const pid of propertyIds) {
+      const p = await ctx.db.get(pid as Id<'properties'>)
+      if (p) propertyNames.set(pid, p.condo)
+    }
+
+    return responses.map((r) => {
+      const sent = sentByResponse.get(r._id)
+      const movedIn = movedInByResponse.get(r._id)
+      const active = movedIn ?? activeDealByResponse.get(r._id)
+      const stage: PipelineStage = movedIn
+        ? 'moved_in'
+        : active
+        ? (active.stage as PipelineStage)
+        : sent
+        ? 'sent'
+        : 'not_contacted'
+      return {
+        ...r,
+        stage,
+        sentCount: sent?.count ?? 0,
+        lastSentAt: sent?.lastSentAt ?? null,
+        lastSentPropertyId: sent?.lastSentPropertyId ?? null,
+        lastSentPropertyCondo: sent?.lastSentPropertyId
+          ? propertyNames.get(sent.lastSentPropertyId) ?? null
+          : null,
+        activeDeal: active
+          ? {
+              _id: active._id,
+              propertyId: active.propertyId,
+              propertyCondo: propertyNames.get(active.propertyId) ?? null,
+              stage: active.stage,
+              loiSentAt: active.loiSentAt,
+              loiSignedAt: active.loiSignedAt,
+              taIssuedAt: active.taIssuedAt,
+              movedInAt: active.movedInAt,
+              finalRentSGD: active.finalRentSGD,
+            }
+          : null,
+      }
+    })
+  },
+})
+
+type PipelineStage =
+  | 'not_contacted'
+  | 'sent'
+  | 'loi_sent'
+  | 'loi_signed'
+  | 'ta_issued'
+  | 'moved_in'
+
 export const add = mutation({
   args: responseFields,
   handler: async (ctx, args) =>
@@ -56,6 +169,44 @@ export const addMany = mutation({
 export const remove = mutation({
   args: { id: v.id('responses') },
   handler: async (ctx, { id }) => ctx.db.delete(id),
+})
+
+// Operator edit for a customer / form response. Only the supplied fields are
+// patched — leaves createdAt, sheetTimestamp, and source untouched unless the
+// caller explicitly overrides them, so a portal edit never accidentally drops
+// the original ingestion provenance.
+export const update = mutation({
+  args: {
+    id: v.id('responses'),
+    patch: v.object({
+      name: v.optional(v.string()),
+      channel: v.optional(v.string()),
+      contact: v.optional(v.string()),
+      school: v.optional(v.string()),
+      moveIn: v.optional(v.string()),
+      leaseLength: v.optional(v.string()),
+      budget: v.optional(v.object({ min: v.number(), max: v.number() })),
+      buildingType: v.optional(v.string()),
+      housingType: v.optional(v.union(v.literal('Room'), v.literal('Whole Unit'))),
+      unitLayout: v.optional(v.array(v.string())),
+      commuteTolMins: v.optional(v.number()),
+      wantRoommate: v.optional(v.boolean()),
+      groupSize: v.optional(v.number()),
+      extras: v.optional(
+        v.object({
+          petFriendly: v.boolean(),
+          cookingAllowed: v.boolean(),
+          quiet: v.boolean(),
+          nearGym: v.boolean(),
+          note: v.string(),
+        }),
+      ),
+      source: v.optional(v.string()),
+    }),
+  },
+  handler: async (ctx, { id, patch }) => {
+    await ctx.db.patch(id, patch)
+  },
 })
 
 // Internal upsert called by the /sheet/sync HTTP action. Rows must already

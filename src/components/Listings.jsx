@@ -37,10 +37,15 @@ export default function ListingsScreen({ properties, toast }) {
   const [statusFilter, setStatusFilter] = React.useState('All')
   const [editingId, setEditingId] = React.useState(null)
   const assignments = useQuery('assignments:list', {}) ?? []
-  const sales = useQuery('sales:list', {}) ?? []
+  const deals = useQuery('deals:list', {}) ?? []
   const closedSet = React.useMemo(
-    () => new Set(sales.filter((s) => s.unclosedAt === undefined).map((s) => s.propertyId)),
-    [sales],
+    () =>
+      new Set(
+        deals
+          .filter((d) => d.stage === 'moved_in' && d.cancelledAt === undefined)
+          .map((d) => d.propertyId),
+      ),
+    [deals],
   )
   const navigate = useNavigate()
 

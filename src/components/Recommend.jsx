@@ -74,9 +74,29 @@ export default function RecommendScreen({ toast, properties, responses }) {
   const addResponse = useMutation('responses:add')
   const addManyResponses = useMutation('responses:addMany')
   const assignments = useQuery('assignments:list', {}) ?? []
+  const deals = useQuery('deals:list') ?? []
   const pin = useMutation('assignments:pin')
   const unpin = useMutation('assignments:unpin')
   const markSent = useMutation('assignments:markSent')
+
+  // Customers whose deal has reached `moved_in` are excluded from every
+  // recommendation surface — they already have a room. Earlier-stage deals
+  // (loi_sent / loi_signed / ta_issued) stay visible because deals fall
+  // through. Existing pinned/sent assignments for moved-in customers still
+  // render in Must-send/Sent (audit trail) — only the candidate pool changes.
+  const movedInResponseIds = React.useMemo(() => {
+    const set = new Set()
+    for (const d of deals) {
+      if (d.stage === 'moved_in' && d.cancelledAt === undefined) {
+        set.add(d.responseId)
+      }
+    }
+    return set
+  }, [deals])
+  const openResponses = React.useMemo(
+    () => responses.filter((r) => !movedInResponseIds.has(r._id)),
+    [responses, movedInResponseIds],
+  )
 
   const [viewMode, setViewMode] = React.useState('by-property')
   const [showManual, setShowManual] = React.useState(false)
@@ -175,7 +195,7 @@ export default function RecommendScreen({ toast, properties, responses }) {
       {viewMode === 'by-property' ? (
         <ByPropertyView
           properties={properties}
-          responses={responses}
+          responses={openResponses}
           assignments={assignments}
           actions={actions}
           toast={toast}
@@ -184,7 +204,7 @@ export default function RecommendScreen({ toast, properties, responses }) {
       ) : (
         <ByClientView
           properties={properties}
-          responses={responses}
+          responses={openResponses}
           assignments={assignments}
           actions={actions}
           toast={toast}
@@ -251,6 +271,24 @@ function Header({ viewMode, onViewMode, hideToggle, actions }) {
 function ByPropertyView({ properties, responses, assignments, actions, toast, initialPropertyId }) {
   const matchable = React.useMemo(() => properties.filter(propertyIsMatchable), [properties])
   const hiddenCount = properties.length - matchable.length
+
+  const [search, setSearch] = React.useState('')
+  const [debouncedSearch, setDebouncedSearch] = React.useState('')
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 200)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const visible = React.useMemo(() => {
+    if (!debouncedSearch) return matchable
+    return matchable.filter((p) => {
+      const hay = [p.condo, p.area, p.unitType, p.rentSGD != null ? String(p.rentSGD) : '']
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+      return hay.includes(debouncedSearch)
+    })
+  }, [matchable, debouncedSearch])
 
   const [selectedId, setSelectedId] = React.useState(
     initialPropertyId && matchable.find((p) => p._id === initialPropertyId)
@@ -325,12 +363,24 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
         <div className="card-head">
           <h3 className="card-title">Choose property</h3>
           <p className="card-sub">
-            {matchable.length} matchable · {responses.length} customer{responses.length === 1 ? '' : 's'} on file
+            {debouncedSearch ? `${visible.length} of ${matchable.length}` : matchable.length} matchable ·{' '}
+            {responses.length} customer{responses.length === 1 ? '' : 's'} on file
           </p>
         </div>
-        <div className="card-pad" style={{ paddingTop: 14 }}>
+        <div className="card-pad" style={{ paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <input
+            className="input"
+            placeholder="Search condo, area, unit type, or rent…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           <div className="property-picker-list">
-            {matchable.map((p) => {
+            {visible.length === 0 ? (
+              <div className="muted" style={{ padding: 14, fontSize: 13 }}>
+                No properties match this search.
+              </div>
+            ) : (
+              visible.map((p) => {
               const { pinned, sent } = partitionAssignmentsForProperty(p._id, assignments)
               return (
                 <button
@@ -350,7 +400,8 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
                   </span>
                 </button>
               )
-            })}
+            })
+            )}
           </div>
           {hiddenCount > 0 && (
             <div className="recommend-hidden-note">
