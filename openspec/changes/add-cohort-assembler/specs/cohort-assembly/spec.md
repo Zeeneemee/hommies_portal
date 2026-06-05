@@ -4,10 +4,12 @@
 
 The system SHALL expose a pure function `assembleCohort(prop, pool, options?)` that, given a whole-unit property and a pool of response records, returns either a structured cohort decision or `null` with a structured reason. The function SHALL be deterministic given the same input pool order and SHALL NOT mutate its inputs.
 
+The `options` argument MAY include `splitPolicy ∈ {'equal','light','standard'}` (default `'standard'`). The policy is threaded into every internal `pairFitForProperty` call and into the final `splitRent` used for room assignment, so the cohort's per-person rents reflect the selected policy. Worked-example assertions below use the standard policy unless stated.
+
 The function SHALL return `{ cohort, cohortScore, roomAssignments, notes, pairFits, reason: null }` on success and `{ cohort: null, reason }` on failure (where `reason` is one of: `'property_not_splittable'`, `'no_eligible_candidates'`, `'pool_too_small'`, `'no_fit_pair'`, `'cohort_incomplete'`, `'no_valid_room_assignment'`).
 
-#### Scenario: Wei × Arjun × Mei on Normanton Park 1M+2C
-- **WHEN** `assembleCohort(normantonPark, [wei, arjun, mei])` is called
+#### Scenario: Wei × Arjun × Mei on Normanton Park 1M+2C — standard policy
+- **WHEN** `assembleCohort(normantonPark, [wei, arjun, mei])` is called with no options (or with `{ splitPolicy: 'standard' }`)
 - **THEN** the result includes a `cohort` of length 3 containing all three responses
 - **AND** `roomAssignments[mei._id]` is `{ rent: 1800, roomKind: 'master' }`
 - **AND** `roomAssignments[wei._id]` and `roomAssignments[arjun._id]` are `{ rent: 1350, roomKind: 'common' }`

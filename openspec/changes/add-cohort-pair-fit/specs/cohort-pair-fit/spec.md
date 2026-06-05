@@ -57,6 +57,8 @@ Move-in date alignment is NOT a hard gate — co-tenants can have different move
 
 ### Requirement: Three-factor weighted scoring (sum 100)
 
+`pairFitForProperty` SHALL accept an optional fourth argument `options` carrying `splitPolicy ∈ {'equal','light','standard'}` (default `'standard'`). The policy SHALL be threaded into `splitRent` and determine the per-room rents used by the budget assignment search. Invalid policy keys SHALL fall back to `'standard'` silently. Worked-example assertions below use the standard policy unless stated.
+
 When no blocker fires, the decision SHALL include a `score` between 0 and 100 computed from three factors with the following weights:
 
 - `budget`: weight 45. Pass (full points) when both sides have an affordable room on the property within their budget; soft (45% of weight) when at least one side fits only by overshooting their max by ≤ `BUDGET_SOFT_OVERSHOOT`.
@@ -69,8 +71,8 @@ The `verdict` SHALL be `'fit'` when no blockers are present, regardless of score
 - **WHEN** `pairFitForProperty(wei, arjun, normantonPark)` is called with the worked-trace fixtures (wei: 1200-1500, NUS, 2026-08-01, 12mo, tol 20; arjun: 1300-1600, NUS, 2026-08-10, 12mo, tol 25)
 - **THEN** `score === 100`, `verdict === 'fit'`, `blockers === []`
 
-#### Scenario: Wei × Mei (cross-budget cohort works because rooms differ)
-- **WHEN** wei (budget 1200-1500) and mei (budget 1600-2000) are compared on Normanton Park 1M+2C
+#### Scenario: Wei × Mei (cross-budget cohort works because rooms differ — under the standard policy)
+- **WHEN** wei (budget 1200-1500) and mei (budget 1600-2000) are compared on Normanton Park 1M+2C with `splitPolicy: 'standard'` (or default)
 - **THEN** the budget factor passes because Wei→common (S$1,350 fits 1200-1500) and Mei→master (S$1,800 fits 1600-2000)
 - **AND** `perPersonRent` is `{ <wei-id>: { rent: 1350, roomKind: 'common' }, <mei-id>: { rent: 1800, roomKind: 'master' } }`
 

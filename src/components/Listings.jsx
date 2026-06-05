@@ -29,21 +29,92 @@ export function isOrphan(property, assignments) {
 // from storage).
 export default function ListingsScreen({ properties, toast }) {
   const [filter, setFilter] = React.useState('All')
+  const [search, setSearch] = React.useState('')
+  const [debouncedSearch, setDebouncedSearch] = React.useState('')
+  const [rentMin, setRentMin] = React.useState('')
+  const [rentMax, setRentMax] = React.useState('')
+  const [housing, setHousing] = React.useState('All')
+  const [statusFilter, setStatusFilter] = React.useState('All')
   const [editingId, setEditingId] = React.useState(null)
   const assignments = useQuery('assignments:list', {}) ?? []
+  const sales = useQuery('sales:list', {}) ?? []
+  const closedSet = React.useMemo(
+    () => new Set(sales.filter((s) => s.unclosedAt === undefined).map((s) => s.propertyId)),
+    [sales],
+  )
   const navigate = useNavigate()
 
-  const filtered = properties.filter((p) => {
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 200)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const matchesChip = (p) => {
     if (filter === 'All') return true
     if (filter === 'Pending poster') return !p.posterStorageId
+    if (filter === 'Taken') return closedSet.has(p._id)
     return p.buildingType === filter
-  })
+  }
+  const matchesSearch = (p) => {
+    if (!debouncedSearch) return true
+    const hay = [p.condo, p.area, p.unitType, p.rentSGD != null ? String(p.rentSGD) : '']
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+    return hay.includes(debouncedSearch)
+  }
+  const matchesRent = (p) => {
+    const min = rentMin === '' ? null : Number(rentMin)
+    const max = rentMax === '' ? null : Number(rentMax)
+    if (min == null && max == null) return true
+    if (p.rentSGD == null) return false
+    if (min != null && p.rentSGD < min) return false
+    if (max != null && p.rentSGD > max) return false
+    return true
+  }
+  const matchesHousing = (p) => housing === 'All' || p.housingType === housing
+  const matchesStatus = (p) => statusFilter === 'All' || p.status === statusFilter
+
+  const filtered = properties.filter(
+    (p) =>
+      matchesChip(p) &&
+      matchesSearch(p) &&
+      matchesRent(p) &&
+      matchesHousing(p) &&
+      matchesStatus(p),
+  )
   const count = (kind) => {
     if (kind === 'All') return properties.length
     if (kind === 'Pending poster') return properties.filter((p) => !p.posterStorageId).length
+    if (kind === 'Taken') return properties.filter((p) => closedSet.has(p._id)).length
     return properties.filter((p) => p.buildingType === kind).length
   }
   const editing = editingId ? properties.find((p) => p._id === editingId) : null
+
+  const advancedActive =
+    rentMin !== '' || rentMax !== '' || housing !== 'All' || statusFilter !== 'All'
+  const filtersActive = debouncedSearch !== '' || advancedActive || filter !== 'All'
+  const [showAdvanced, setShowAdvanced] = React.useState(false)
+  React.useEffect(() => {
+    if (advancedActive) setShowAdvanced(true)
+  }, [advancedActive])
+
+  const clearFilters = () => {
+    setFilter('All')
+    setSearch('')
+    setRentMin('')
+    setRentMax('')
+    setHousing('All')
+    setStatusFilter('All')
+  }
+
+  const chipDefs = [
+    { key: 'All' },
+    { key: 'Condo' },
+    { key: 'HDB' },
+    { key: 'Pending poster' },
+    { key: 'Taken', tone: 'danger' },
+  ]
 
   return (
     <div>
@@ -59,27 +130,129 @@ export default function ListingsScreen({ properties, toast }) {
       </div>
 
       <div className="listings-bar">
-        <div className="filter-chips">
-          {['All', 'Condo', 'HDB', 'Pending poster'].map((f) => (
-            <button
-              key={f}
-              type="button"
-              className={`filter-chip ${filter === f ? 'on' : ''}`}
-              onClick={() => setFilter(f)}
-            >
-              {f} ({count(f)})
-            </button>
-          ))}
+        <div className="listings-search-row">
+          <span className="listings-search-icon" aria-hidden="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </span>
+          <input
+            type="search"
+            className="listings-search"
+            placeholder="Search condo, area, unit type, or rent…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+          <button
+            type="button"
+            className={`more-filters-toggle ${showAdvanced ? 'on' : ''} ${advancedActive ? 'has-active' : ''}`}
+            onClick={() => setShowAdvanced((s) => !s)}
+            aria-expanded={showAdvanced}
+            aria-label="Toggle more filters"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 6h18M6 12h12M10 18h4" />
+            </svg>
+            <span className="more-filters-label">Filters</span>
+            {advancedActive && <span className="more-filters-dot" aria-hidden="true" />}
+          </button>
         </div>
-        <div style={{ fontSize: 13, color: 'var(--ink-mute)' }}>
-          {filtered.length} of {properties.length} shown
+
+        <div className="filter-chips chip-rail" role="tablist" aria-label="Quick filters">
+          {chipDefs.map(({ key, tone }) => {
+            const active = filter === key
+            const n = count(key)
+            return (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                className={`filter-chip ${active ? 'on' : ''} ${tone ? `tone-${tone}` : ''}`}
+                onClick={() => setFilter(key)}
+              >
+                <span className="chip-label">{key}</span>
+                <span className="chip-count">{n}</span>
+              </button>
+            )
+          })}
+        </div>
+
+        {showAdvanced && (
+          <div className="listings-extra-filters" id="advanced-filters">
+            <div className="rent-range">
+              <input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                className="input input-sm"
+                placeholder="Min S$"
+                value={rentMin}
+                onChange={(e) => setRentMin(e.target.value)}
+                aria-label="Minimum rent"
+              />
+              <span className="rent-range-sep">–</span>
+              <input
+                type="number"
+                inputMode="numeric"
+                min="0"
+                className="input input-sm"
+                placeholder="Max S$"
+                value={rentMax}
+                onChange={(e) => setRentMax(e.target.value)}
+                aria-label="Maximum rent"
+              />
+            </div>
+            <select
+              className="select select-sm"
+              value={housing}
+              onChange={(e) => setHousing(e.target.value)}
+              aria-label="Housing type"
+            >
+              <option value="All">Housing: All</option>
+              <option value="Room">Room</option>
+              <option value="Whole Unit">Whole Unit</option>
+            </select>
+            <select
+              className="select select-sm"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              aria-label="Status"
+            >
+              <option value="All">Status: All</option>
+              <option value="data_received">Data received</option>
+              <option value="poster_attached">Poster attached</option>
+              <option value="sent">Sent</option>
+            </select>
+          </div>
+        )}
+
+        <div className="listings-bar-foot">
+          <div className="listings-count">
+            {filtered.length} of {properties.length} shown
+          </div>
+          {filtersActive && (
+            <button type="button" className="link-btn" onClick={clearFilters}>
+              Clear filters
+            </button>
+          )}
         </div>
       </div>
 
       {filtered.length === 0 && (
         <div className="empty">
-          <h4>Nothing here yet</h4>
-          <p>Add a property to start an inventory.</p>
+          <h4>{filtersActive ? 'No listings match your filters' : 'Nothing here yet'}</h4>
+          <p>
+            {filtersActive
+              ? 'Clear filters to see everything.'
+              : 'Add a property to start an inventory.'}
+          </p>
+          {filtersActive && (
+            <button type="button" className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ marginTop: 10 }}>
+              Clear filters
+            </button>
+          )}
         </div>
       )}
 
@@ -89,6 +262,7 @@ export default function ListingsScreen({ properties, toast }) {
             key={p._id}
             property={p}
             orphan={isOrphan(p, assignments)}
+            closed={closedSet.has(p._id)}
             onEdit={() => setEditingId(p._id)}
             onOpenInRecommend={() => navigate(`/recommend?property=${p._id}`)}
             toast={toast}
@@ -123,7 +297,7 @@ function ListingEditController({ property, onClose, toast }) {
   return <ListingEditModal property={property} onClose={onClose} onSave={handleSave} toast={toast} />
 }
 
-function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) {
+function ListingCard({ property: p, orphan, closed, onEdit, onOpenInRecommend, toast }) {
   const advanceStatus = useMutation('properties:advanceStatus')
   const removeProperty = useMutation('properties:remove')
   const [busy, setBusy] = React.useState(false)
@@ -221,6 +395,11 @@ function ListingCard({ property: p, orphan, onEdit, onOpenInRecommend, toast }) 
         >
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {p.buildingType && <Pill kind="navy">{p.buildingType}</Pill>}
+            {closed && (
+              <Pill kind="danger" dot>
+                <Icon name="check" size={10} /> Closed sale
+              </Pill>
+            )}
             {p.posterStorageId ? (
               <Pill kind="green" dot>
                 Poster ready

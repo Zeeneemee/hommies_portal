@@ -198,6 +198,15 @@ function sanitiseGeminiFields(raw: any): Record<string, unknown> {
   if (mc != null && mc >= 0 && Number.isInteger(mc)) out.masterCount = mc
   const cc = num(raw.commonCount)
   if (cc != null && cc >= 0 && Number.isInteger(cc)) out.commonCount = cc
+  // PropertyGuru almost never breaks bedrooms into master/common. If we have
+  // a total bedroom count but no breakdown, assume the SG convention: one
+  // master, the rest common. The operator can still override in the edit
+  // modal. (Studios → bedrooms=1 still produces master=1, common=0, which
+  // matches how they're shared in practice.)
+  if (typeof out.bedrooms === 'number' && out.bedrooms >= 1) {
+    if (out.masterCount === undefined) out.masterCount = 1
+    if (out.commonCount === undefined) out.commonCount = Math.max(0, out.bedrooms - 1)
+  }
   if (typeof raw.furnishing === 'string' && raw.furnishing.trim()) out.furnishing = raw.furnishing.trim()
   if (typeof raw.availability === 'string' && raw.availability.trim()) out.availability = raw.availability.trim()
   if (typeof raw.listingTitle === 'string' && raw.listingTitle.trim()) out.listingTitle = raw.listingTitle.trim()

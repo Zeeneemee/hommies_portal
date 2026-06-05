@@ -13,26 +13,43 @@ export const SEND_THRESHOLD = 58
 export const BUDGET_SOFT_OVERSHOOT = 200 // S$
 /** Commute minutes over tolerance that are forgiven (soft, not blocker). */
 export const COMMUTE_SOFT_OVER = 15
-/** Premium a master bedroom pays over the per-room average. Commons absorb the
- *  remainder so the split always sums to the unit rent. */
-export const MASTER_PREMIUM = 1.20
+/** Three named split policies. Each describes how a whole-unit listing's rent
+ *  is divided between its master bedroom(s) and common bedroom(s):
+ *    - equal     1.00× — every room costs the per-room average
+ *    - light     1.10× — master pays a 10% premium; commons absorb the
+ *                       remainder so totals still conserve
+ *    - standard  1.20× — master pays a 20% premium (the original rule, kept as
+ *                       the default for back-compat with every existing caller)
+ *  Operators pick the policy that matches the tenants' negotiation. */
+export const SPLIT_POLICIES = Object.freeze({
+  equal:    { label: 'Equal split (50/50)',    premium: 1.00 },
+  light:    { label: 'Light premium (10%)',    premium: 1.10 },
+  standard: { label: 'Standard premium (20%)', premium: 1.20 },
+})
+/** Default policy when callers don't specify one. Reproduces today's behaviour. */
+export const DEFAULT_SPLIT_POLICY = 'standard'
+/** Back-compat alias for the previous single-policy constant. Bound to
+ *  the standard policy's premium so external imports stay at 1.20. */
+export const MASTER_PREMIUM = SPLIT_POLICIES.standard.premium
 
 const SCHOOL_CAMPUSES = ['NUS', 'NTU', 'SMU']
 
 /**
- * Split a whole-unit listing's rent across its bedrooms (Option A).
- * Returns null when the inputs don't describe a splittable layout.
+ * Split a whole-unit listing's rent across its bedrooms (Option A) under one
+ * of the named split policies. Returns null when the inputs don't describe
+ * a splittable layout. Invalid policy keys fall back to the default silently.
  *
- *   - both counts present + at least one > 0: master pays avg × 1.20,
+ *   - both counts present + at least one > 0: master pays avg × policy.premium,
  *     commons absorb the remainder so master×masterCount + common×commonCount === rent.
  *   - commonCount === 0: each master pays rent / masterCount (no premium —
  *     no commons to absorb the discount).
  *   - masterCount === 0: each common pays rent / commonCount.
  *
  * @param {{rentSGD?:number, masterCount?:number, commonCount?:number}} prop
+ * @param {'equal'|'light'|'standard'} [policy='standard']
  * @returns {{master:number|null, common:number|null, perRoomAvg:number}|null}
  */
-export function splitRent(prop) {
+export function splitRent(prop, policy = DEFAULT_SPLIT_POLICY) {
   const rent = prop?.rentSGD
   const mc = prop?.masterCount
   const cc = prop?.commonCount
@@ -40,10 +57,11 @@ export function splitRent(prop) {
   if (typeof mc !== 'number' || typeof cc !== 'number') return null
   const rooms = mc + cc
   if (rooms <= 0) return null
+  const premium = SPLIT_POLICIES[policy]?.premium ?? SPLIT_POLICIES[DEFAULT_SPLIT_POLICY].premium
   const perRoomAvg = rent / rooms
   if (cc === 0) return { master: rent / mc, common: null, perRoomAvg }
   if (mc === 0) return { master: null, common: rent / cc, perRoomAvg }
-  const master = perRoomAvg * MASTER_PREMIUM
+  const master = perRoomAvg * premium
   const common = (rent - mc * master) / cc
   return { master, common, perRoomAvg }
 }
@@ -190,13 +208,14 @@ function pickRoomAssignment(rooms, a, b) {
  *   perPersonRent: Record<string, {rent:number, roomKind:'master'|'common'}> | null
  * }}
  */
-export function pairFitForProperty(a, b, prop) {
+export function pairFitForProperty(a, b, prop, options = {}) {
   // Sentinel-null cases — these are "doesn't make sense", not "unfit".
   if (a === b) return null
   if (a?._id && b?._id && a._id === b._id) return null
   if ((a?.groupSize ?? 1) > 1) return null
   if ((b?.groupSize ?? 1) > 1) return null
 
+  const policy = options.splitPolicy ?? DEFAULT_SPLIT_POLICY
   const crit = []
   const blockers = []
   const lifestyleNotes = []
@@ -224,7 +243,7 @@ export function pairFitForProperty(a, b, prop) {
   // count, then pick the assignment that minimises soft-overshoot, then
   // under-budget side count, then max(rent).
   let perPersonRent = null
-  const split = splitRent(prop)
+  const split = splitRent(prop, policy)
   if (!split) {
     blockers.push('budget_unaffordable')
     crit.push({
@@ -477,10 +496,11 @@ function isPropertyAssemblable(prop) {
  *   reason: string|null
  * }}
  */
-export function assembleCohort(prop, pool, _options) {
+export function assembleCohort(prop, pool, options = {}) {
   if (!isPropertyAssemblable(prop)) {
     return { cohort: null, reason: 'property_not_splittable' }
   }
+  const policy = options.splitPolicy ?? DEFAULT_SPLIT_POLICY
   const eligible = (Array.isArray(pool) ? pool : []).filter(isEligibleForCohort)
   if (eligible.length === 0) {
     return { cohort: null, reason: 'no_eligible_candidates' }
@@ -496,7 +516,7 @@ export function assembleCohort(prop, pool, _options) {
     const lo = Math.min(i, j)
     const hi = Math.max(i, j)
     const key = `${lo}:${hi}`
-    if (!memo.has(key)) memo.set(key, pairFitForProperty(eligible[lo], eligible[hi], prop))
+    if (!memo.has(key)) memo.set(key, pairFitForProperty(eligible[lo], eligible[hi], prop, { splitPolicy: policy }))
     return memo.get(key)
   }
 
@@ -559,7 +579,7 @@ export function assembleCohort(prop, pool, _options) {
   }
 
   const cohort = cohortIdx.map((i) => eligible[i])
-  const split = splitRent(prop)
+  const split = splitRent(prop, policy)
   if (!split) {
     // Defensive — isPropertyAssemblable should have caught this.
     return { cohort: null, reason: 'no_valid_room_assignment' }

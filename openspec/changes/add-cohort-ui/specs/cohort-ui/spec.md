@@ -25,7 +25,7 @@ When any condition fails, the button section SHALL be absent (no disabled state,
 
 ### Requirement: Click invokes `assembleCohort` synchronously
 
-The "Suggest cohort" button's click handler SHALL call `assembleCohort(property, responses)` synchronously and store the returned object in component state. The handler SHALL NOT show a loading spinner, defer the call, or fetch additional data — the assembler is a pure function that runs in well under one frame.
+The "Suggest cohorts" button's click handler SHALL call `assembleCohort(property, responses, { splitPolicy: key })` synchronously once per policy in `SPLIT_POLICIES` and store the three returned objects in component state. The handler SHALL NOT show a loading spinner, defer the call, or fetch additional data — the assembler is a pure function that runs in well under one frame. The resulting comparison row is specified separately by the `split-policies` capability; this requirement only mandates the synchronous click semantics. (Pre-split-policies behaviour: a single click rendered one card under the implicit standard policy. The `split-policies` capability supersedes that into a three-card side-by-side row, but the underlying assembler-call-on-click invariant is unchanged.)
 
 #### Scenario: Click renders a result card immediately
 - **WHEN** the operator clicks "Suggest cohort" on a qualifying property

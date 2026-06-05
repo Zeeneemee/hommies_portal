@@ -11,6 +11,8 @@ import {
   assembleCohort,
   cohortMoveInSpan,
   COHORT_TIE_BREAKERS,
+  SPLIT_POLICIES,
+  DEFAULT_SPLIT_POLICY,
   W,
   SEND_THRESHOLD,
   BUDGET_SOFT_OVERSHOOT,
@@ -960,6 +962,231 @@ describe('assembleCohort — layout variants', () => {
 })
 
 // --- parseGoogleFormCSV ----------------------------------------------------
+
+// --- SPLIT_POLICIES enum --------------------------------------------------
+
+describe('SPLIT_POLICIES enum', () => {
+  it('exposes exactly three policies in order equal, light, standard', () => {
+    expect(Object.keys(SPLIT_POLICIES)).toEqual(['equal', 'light', 'standard'])
+    expect(SPLIT_POLICIES.equal.premium).toBe(1.00)
+    expect(SPLIT_POLICIES.light.premium).toBe(1.10)
+    expect(SPLIT_POLICIES.standard.premium).toBe(1.20)
+  })
+
+  it('is frozen', () => {
+    expect(Object.isFrozen(SPLIT_POLICIES)).toBe(true)
+  })
+
+  it('every entry has a label string', () => {
+    for (const key of Object.keys(SPLIT_POLICIES)) {
+      expect(typeof SPLIT_POLICIES[key].label).toBe('string')
+      expect(SPLIT_POLICIES[key].label.length).toBeGreaterThan(0)
+    }
+  })
+
+  it('DEFAULT_SPLIT_POLICY is "standard"', () => {
+    expect(DEFAULT_SPLIT_POLICY).toBe('standard')
+  })
+
+  it('MASTER_PREMIUM back-compat alias equals SPLIT_POLICIES.standard.premium', () => {
+    expect(MASTER_PREMIUM).toBe(SPLIT_POLICIES.standard.premium)
+    expect(MASTER_PREMIUM).toBe(1.20)
+  })
+})
+
+// --- splitRent with policy parameter -------------------------------------
+
+describe('splitRent — policy parameter', () => {
+  const props4500_1M2C = { rentSGD: 4500, masterCount: 1, commonCount: 2 }
+  const props4300_1M1C = { rentSGD: 4300, masterCount: 1, commonCount: 1 }
+
+  it('no-args call equals explicit standard policy', () => {
+    expect(splitRent(props4500_1M2C)).toEqual(splitRent(props4500_1M2C, 'standard'))
+    expect(splitRent(props4300_1M1C)).toEqual(splitRent(props4300_1M1C, 'standard'))
+  })
+
+  it('equal policy on 4500/1M+2C → every room at S$1,500', () => {
+    const r = splitRent(props4500_1M2C, 'equal')
+    expect(r.master).toBeCloseTo(1500, 6)
+    expect(r.common).toBeCloseTo(1500, 6)
+    expect(r.perRoomAvg).toBeCloseTo(1500, 6)
+  })
+
+  it('light policy on 4500/1M+2C → master at avg × 1.10, total conserves', () => {
+    const r = splitRent(props4500_1M2C, 'light')
+    expect(r.master).toBeCloseTo(1500 * 1.10, 6) // 1650
+    expect(1 * r.master + 2 * r.common).toBeCloseTo(4500, 6)
+  })
+
+  it('standard policy on 4300/1M+1C reproduces the historical 2580/1720 numbers', () => {
+    const r = splitRent(props4300_1M1C, 'standard')
+    expect(r.master).toBeCloseTo(2580, 6)
+    expect(r.common).toBeCloseTo(1720, 6)
+  })
+
+  it('invalid policy key silently falls back to standard', () => {
+    expect(splitRent(props4500_1M2C, 'whatever-typo')).toEqual(splitRent(props4500_1M2C, 'standard'))
+  })
+
+  it('rent conserves under every policy on a mixed layout', () => {
+    for (const policy of Object.keys(SPLIT_POLICIES)) {
+      const r = splitRent(props4500_1M2C, policy)
+      expect(1 * r.master + 2 * r.common).toBeCloseTo(4500, 6)
+    }
+  })
+})
+
+// --- pairFitForProperty with policy --------------------------------------
+
+describe('pairFitForProperty — splitPolicy option', () => {
+  const normantonPark = {
+    _id: 'p1',
+    housingType: 'Whole Unit',
+    masterCount: 1,
+    commonCount: 2,
+    rentSGD: 4500,
+    commuteMins: { NUS: 12, NTU: 38, SMU: 22 },
+  }
+  const baseResp = (over = {}) => ({
+    _id: 'r-default',
+    name: 'Default',
+    channel: 'Line',
+    contact: '@x',
+    school: 'NUS',
+    moveIn: '2026-08-05',
+    leaseLength: '12 months',
+    budget: { min: 1200, max: 1500 },
+    buildingType: 'Condo',
+    housingType: 'Room',
+    unitLayout: ['Common Room'],
+    commuteTolMins: 20,
+    wantRoommate: true,
+    groupSize: 1,
+    extras: { petFriendly: false, cookingAllowed: false, quiet: false, nearGym: false, note: '' },
+    ...over,
+  })
+
+  it('no-options call equals explicit standard policy', () => {
+    const a = baseResp({ _id: 'A', budget: { min: 1200, max: 1500 }, moveIn: '2026-08-01' })
+    const b = baseResp({ _id: 'B', budget: { min: 1300, max: 1600 }, moveIn: '2026-08-10' })
+    const noOpts = pairFitForProperty(a, b, normantonPark)
+    const std = pairFitForProperty(a, b, normantonPark, { splitPolicy: 'standard' })
+    expect(noOpts.score).toBe(std.score)
+    expect(noOpts.verdict).toBe(std.verdict)
+    expect(noOpts.perPersonRent).toEqual(std.perPersonRent)
+  })
+
+  it('Regent Heights: standard blocks Mei+Arjun, light passes', () => {
+    const regent = {
+      _id: 'p-regent',
+      housingType: 'Whole Unit',
+      masterCount: 1,
+      commonCount: 1,
+      rentSGD: 3800,
+      commuteMins: { NUS: 45, NTU: 35, SMU: 40 },
+    }
+    const mei = baseResp({ _id: 'mei', name: 'Mei', budget: { min: 1600, max: 2000 } })
+    const arjun = baseResp({ _id: 'arjun', name: 'Arjun', budget: { min: 1300, max: 1600 }, moveIn: '2026-08-10', commuteTolMins: 25 })
+
+    const std = pairFitForProperty(mei, arjun, regent, { splitPolicy: 'standard' })
+    expect(std.verdict).toBe('unfit')
+    expect(std.blockers).toContain('budget_unaffordable')
+
+    const light = pairFitForProperty(mei, arjun, regent, { splitPolicy: 'light' })
+    expect(light.verdict).toBe('fit')
+  })
+
+  it('invalid policy in options falls back to standard', () => {
+    const a = baseResp({ _id: 'A', budget: { min: 1200, max: 1500 }, moveIn: '2026-08-01' })
+    const b = baseResp({ _id: 'B', budget: { min: 1300, max: 1600 }, moveIn: '2026-08-10' })
+    const bad = pairFitForProperty(a, b, normantonPark, { splitPolicy: 'whatever' })
+    const std = pairFitForProperty(a, b, normantonPark, { splitPolicy: 'standard' })
+    expect(bad).toEqual(std)
+  })
+})
+
+// --- assembleCohort with policy ------------------------------------------
+
+describe('assembleCohort — splitPolicy option', () => {
+  const normantonPark = {
+    _id: 'p1',
+    condo: 'Normanton Park',
+    housingType: 'Whole Unit',
+    masterCount: 1,
+    commonCount: 2,
+    rentSGD: 4500,
+    commuteMins: { NUS: 12, NTU: 38, SMU: 22 },
+  }
+  const baseResp = (over = {}) => ({
+    name: 'Default',
+    channel: 'Line',
+    contact: '@x',
+    school: 'NUS',
+    moveIn: '2026-08-05',
+    leaseLength: '12 months',
+    budget: { min: 1200, max: 1500 },
+    buildingType: 'Condo',
+    housingType: 'Room',
+    unitLayout: ['Common Room'],
+    commuteTolMins: 20,
+    wantRoommate: true,
+    groupSize: 1,
+    extras: { petFriendly: false, cookingAllowed: false, quiet: false, nearGym: false, note: '' },
+    ...over,
+  })
+  const wei = baseResp({ _id: 'r-wei', name: 'Wei', budget: { min: 1200, max: 1500 }, moveIn: '2026-08-01', commuteTolMins: 20 })
+  const arjun = baseResp({ _id: 'r-arjun', name: 'Arjun', budget: { min: 1300, max: 1600 }, moveIn: '2026-08-10', commuteTolMins: 25 })
+  const mei = baseResp({ _id: 'r-mei', name: 'Mei', budget: { min: 1600, max: 2000 }, moveIn: '2026-08-05', commuteTolMins: 20 })
+
+  it('no-options call equals explicit standard policy', () => {
+    const noOpts = assembleCohort(normantonPark, [wei, arjun, mei])
+    const std = assembleCohort(normantonPark, [wei, arjun, mei], { splitPolicy: 'standard' })
+    expect(noOpts.cohort?.map((m) => m._id).sort()).toEqual(std.cohort?.map((m) => m._id).sort())
+    expect(noOpts.roomAssignments).toEqual(std.roomAssignments)
+  })
+
+  it('equal policy on 1M+2C @ S$4,500 → every member assigned S$1,500', () => {
+    const r = assembleCohort(normantonPark, [wei, arjun, mei], { splitPolicy: 'equal' })
+    expect(r.cohort).not.toBeNull()
+    for (const id of ['r-wei', 'r-arjun', 'r-mei']) {
+      expect(r.roomAssignments[id].rent).toBe(1500)
+    }
+    expect(Object.values(r.roomAssignments).reduce((s, v) => s + v.rent, 0)).toBe(4500)
+  })
+
+  it('light policy on 1M+2C @ S$4,500 → Mei → master at avg × 1.10, sum conserves', () => {
+    const r = assembleCohort(normantonPark, [wei, arjun, mei], { splitPolicy: 'light' })
+    expect(r.cohort).not.toBeNull()
+    expect(r.roomAssignments['r-mei'].roomKind).toBe('master')
+    // master = 1500 * 1.10 = 1650
+    expect(r.roomAssignments['r-mei'].rent).toBe(1650)
+    const total = Object.values(r.roomAssignments).reduce((s, v) => s + v.rent, 0)
+    expect(total).toBe(4500)
+  })
+
+  it('Regent Heights pool: standard returns no_fit_pair; light returns a Mei+Arjun cohort', () => {
+    const regent = {
+      _id: 'p-regent',
+      housingType: 'Whole Unit',
+      masterCount: 1,
+      commonCount: 1,
+      rentSGD: 3800,
+      commuteMins: { NUS: 45, NTU: 35, SMU: 40 },
+    }
+    // Pool: Mei (2000), Arjun (1600), Wei (1500). On Regent at 'standard'
+    // master is 2280; no one affords. On 'light' master is 2090, Mei fits soft.
+    const pool = [wei, arjun, mei]
+
+    const std = assembleCohort(regent, pool, { splitPolicy: 'standard' })
+    expect(std).toEqual({ cohort: null, reason: 'no_fit_pair' })
+
+    const light = assembleCohort(regent, pool, { splitPolicy: 'light' })
+    expect(light.cohort).not.toBeNull()
+    // Cohort target = 2; must include Mei (only master-capable at 'light')
+    expect(light.cohort.map((m) => m._id)).toContain('r-mei')
+    expect(light.roomAssignments['r-mei']?.roomKind).toBe('master')
+  })
+})
 
 describe('parseGoogleFormCSV', () => {
   it('matches columns by bilingual headers regardless of order, parses budget range, school, layouts', () => {

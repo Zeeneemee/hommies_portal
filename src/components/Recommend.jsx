@@ -7,6 +7,8 @@ import {
   parseGoogleFormCSV,
   decide,
   assembleCohort,
+  splitRent,
+  SPLIT_POLICIES,
 } from '../decisionLogic.js'
 import {
   partitionAssignmentsForProperty,
@@ -256,9 +258,11 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
       : matchable[0]?._id || null,
   )
   const [expanded, setExpanded] = React.useState({})
-  // Cohort assembly state — cleared when the selected property changes.
-  const [cohortResult, setCohortResult] = React.useState(null)
-  React.useEffect(() => { setCohortResult(null) }, [selectedId])
+  // Cohort assembly state — one comparison per click holds all three
+  // policy results. Cleared when the selected property changes.
+  //   { byPolicy: { equal, light, standard }, dismissed: Set<policy> } | null
+  const [cohortComparison, setCohortComparison] = React.useState(null)
+  React.useEffect(() => { setCohortComparison(null) }, [selectedId])
 
   React.useEffect(() => {
     if (initialPropertyId && matchable.find((p) => p._id === initialPropertyId)) {
@@ -393,20 +397,33 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
                   <button
                     type="button"
                     className="btn btn-primary btn-sm"
-                    onClick={() => setCohortResult(assembleCohort(prop, responses))}
+                    onClick={() => {
+                      const byPolicy = {}
+                      for (const key of Object.keys(SPLIT_POLICIES)) {
+                        byPolicy[key] = assembleCohort(prop, responses, { splitPolicy: key })
+                      }
+                      setCohortComparison({ byPolicy, dismissed: new Set() })
+                    }}
                   >
-                    <Icon name="check" size={12} /> Suggest cohort
+                    <Icon name="check" size={12} /> Suggest cohorts
                   </button>
                 </div>
               )}
           </div>
         )}
 
-        {cohortResult && prop && (
-          <CohortResultCard
-            result={cohortResult}
+        {cohortComparison && prop && (
+          <CohortComparisonRow
+            comparison={cohortComparison}
             property={prop}
-            onDismiss={() => setCohortResult(null)}
+            onDismissPolicy={(policyKey) =>
+              setCohortComparison((curr) => {
+                if (!curr) return curr
+                const next = new Set(curr.dismissed)
+                next.add(policyKey)
+                return { ...curr, dismissed: next }
+              })
+            }
           />
         )}
 
@@ -834,8 +851,73 @@ const COHORT_REASON_COPY = {
   no_valid_room_assignment: 'Compatible cohort found but no room assignment fits every member’s budget.',
 }
 
-function CohortResultCard({ result, property, onDismiss }) {
+// Wraps three CohortResultCards (one per split policy) in a horizontal grid.
+// Each card is independently dismissible. When all three are dismissed, the
+// whole row returns null so the layout collapses cleanly.
+function CohortComparisonRow({ comparison, property, onDismissPolicy }) {
+  if (!comparison || !property) return null
+  const policyKeys = Object.keys(SPLIT_POLICIES)
+  const visible = policyKeys.filter((p) => !comparison.dismissed.has(p))
+  if (visible.length === 0) return null
+
+  const fitCount = visible.filter((p) => comparison.byPolicy[p]?.cohort != null).length
+
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '8px 12px',
+          background: 'var(--cream, #fff8ec)',
+          border: '1px solid var(--hairline)',
+          borderRadius: 6,
+          marginBottom: 8,
+          fontSize: 12,
+        }}
+      >
+        <div>
+          <strong>Cohort suggestions across split policies.</strong>{' '}
+          <span style={{ color: 'var(--ink-mute)' }}>
+            Operator picks the policy the tenants accept.
+          </span>
+        </div>
+        <div style={{ color: 'var(--ink-mute)' }}>
+          {fitCount} of {visible.length} produced a cohort
+        </div>
+      </div>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12 }}>
+        {visible.map((key) => (
+          <div key={key} style={{ flex: '1 1 280px', minWidth: 280 }}>
+            <CohortResultCard
+              result={comparison.byPolicy[key]}
+              property={property}
+              policy={key}
+              onDismiss={() => onDismissPolicy(key)}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function CohortResultCard({ result, property, policy, onDismiss }) {
   if (!result) return null
+
+  // Policy header — label + per-room rents under that policy. Computed from
+  // splitRent so the card stays honest even if the assembler short-circuited.
+  const policyMeta = policy ? SPLIT_POLICIES[policy] : null
+  const split = policy ? splitRent(property, policy) : null
+  const rentLine = split
+    ? [
+        split.master != null && `master S$${formatSGD(Math.round(split.master))}`,
+        split.common != null && `common S$${formatSGD(Math.round(split.common))}`,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : null
 
   // Failure path — show the structured reason.
   if (!result.cohort) {
@@ -846,7 +928,17 @@ function CohortResultCard({ result, property, onDismiss }) {
           style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}
         >
           <div>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 4 }}>
+            {policyMeta && (
+              <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+                {policyMeta.label}
+              </div>
+            )}
+            {rentLine && (
+              <div style={{ fontSize: 11, color: 'var(--ink-mute)', marginTop: 2 }}>
+                {rentLine}
+              </div>
+            )}
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginTop: policyMeta ? 6 : 0, marginBottom: 4 }}>
               No cohort suggestion
             </div>
             <div style={{ fontSize: 13, color: 'var(--ink-mute)' }}>
@@ -873,7 +965,17 @@ function CohortResultCard({ result, property, onDismiss }) {
         style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}
       >
         <div>
-          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)' }}>
+          {policyMeta && (
+            <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--ink-mute)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+              {policyMeta.label}
+            </div>
+          )}
+          {rentLine && (
+            <div style={{ fontSize: 11, color: 'var(--ink-mute)', marginTop: 2 }}>
+              {rentLine}
+            </div>
+          )}
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginTop: policyMeta ? 6 : 0 }}>
             Suggested cohort · {cohort.length} of {target}
           </div>
           <div style={{ fontSize: 12, color: 'var(--ink-mute)', marginTop: 2 }}>
