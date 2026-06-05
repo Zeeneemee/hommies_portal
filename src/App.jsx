@@ -3,7 +3,6 @@ import { Routes, Route, NavLink, Navigate, useLocation, useNavigate } from 'reac
 import { useQuery } from 'convex/react'
 import AddProperty from './components/AddProperty.jsx'
 import AddPropertyChat from './components/AddPropertyChat.jsx'
-import BatchAddProperty from './components/BatchAddProperty.jsx'
 import StatusScreen from './components/Status.jsx'
 import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
@@ -25,7 +24,6 @@ const NAV = [
   ...(CHAT_INTAKE_ENABLED
     ? [{ id: 'add-chat', to: '/add/chat', label: 'Add (chat) · beta', step: '★' }]
     : []),
-  { id: 'batch', to: '/add/batch', label: 'Batch Add', step: '1+' },
   { id: 'status', to: '/status', label: 'Status', step: 2 },
   { id: 'recommend', to: '/recommend', label: 'Recommend', step: 3 },
   { id: 'listings', to: '/listings', label: 'Listings', step: 4 },
@@ -165,9 +163,8 @@ export default function App() {
   if (!linked) return <NotLinkedNotice />
 
   const counts = {
-    add: '',
+    add: batchDraft.rows.length || '',
     'add-chat': '',
-    batch: batchDraft.rows.length || '',
     status: properties.length,
     recommend: responses.length,
     listings: properties.length,
@@ -267,6 +264,7 @@ export default function App() {
                 onSaved={() => navigate('/status')}
                 properties={properties}
                 draft={addDraft}
+                batchDraft={batchDraft}
               />
             }
           />
@@ -284,10 +282,7 @@ export default function App() {
               )
             }
           />
-          <Route
-            path="/add/batch"
-            element={<BatchAddProperty toast={toast} draft={batchDraft} />}
-          />
+          <Route path="/add/batch" element={<Navigate to="/add" replace />} />
           <Route path="/status" element={<StatusScreen toast={toast} properties={properties} />} />
           <Route
             path="/recommend"

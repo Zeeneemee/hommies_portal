@@ -105,7 +105,7 @@ function posterBlockersFor(row) {
   return missing
 }
 
-export default function BatchAddProperty({ toast, draft }) {
+export default function BatchAddProperty({ toast, draft, embedded = false }) {
   const { rows, setRows, urlInput, setUrlInput, maxParallel, setMaxParallel, reset } = draft
 
   const addProperty = useMutation('properties:add')
@@ -120,8 +120,11 @@ export default function BatchAddProperty({ toast, draft }) {
   const inflightRef = React.useRef(new Set())
   const rowsRef = React.useRef(rows)
   const maxParallelRef = React.useRef(maxParallel)
+  const pausedRef = React.useRef(false)
+  const [paused, setPaused] = React.useState(false)
   React.useEffect(() => { rowsRef.current = rows }, [rows])
   React.useEffect(() => { maxParallelRef.current = maxParallel }, [maxParallel])
+  React.useEffect(() => { pausedRef.current = paused }, [paused])
 
   const updateRow = React.useCallback((id, patch) => {
     setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...(typeof patch === 'function' ? patch(r) : patch) } : r)))
@@ -131,12 +134,10 @@ export default function BatchAddProperty({ toast, draft }) {
   // up new queued rows, respecting `maxParallel`. Each row's extraction is
   // a self-contained async fn; failures land on the row, not the queue.
   React.useEffect(() => {
-    let cancelled = false
     async function extractRow(row) {
       try {
         updateRow(row.id, { status: 'extracting', error: null })
         const res = await extractPropertyGuruUrl({ url: row.url })
-        if (cancelled) return
         if (!res?.ok) {
           updateRow(row.id, {
             status: 'failed',
@@ -158,7 +159,6 @@ export default function BatchAddProperty({ toast, draft }) {
         if (remoteUrls.length) {
           try {
             const fetched = await fetchImagesAsData({ urls: remoteUrls.slice(0, IMAGE_CAP) })
-            if (cancelled) return
             images = (fetched.images || []).map((img, i) => {
               const bytes = Uint8Array.from(atob(img.dataB64), (c) => c.charCodeAt(0))
               const blob = new Blob([bytes], { type: img.contentType || 'image/jpeg' })
@@ -190,7 +190,7 @@ export default function BatchAddProperty({ toast, draft }) {
     }
 
     function tick() {
-      if (cancelled) return
+      if (pausedRef.current) return
       const inflight = inflightRef.current
       const current = rowsRef.current
       while (inflight.size < maxParallelRef.current) {
@@ -202,8 +202,7 @@ export default function BatchAddProperty({ toast, draft }) {
     }
 
     tick()
-    return () => { cancelled = true }
-  }, [rows, maxParallel, updateRow, extractPropertyGuruUrl, fetchImagesAsData])
+  }, [rows, maxParallel, paused, updateRow, extractPropertyGuruUrl, fetchImagesAsData])
 
   function handleAddUrls() {
     const tokens = urlInput.split(/\s+/).map((s) => s.trim()).filter(Boolean)
@@ -469,31 +468,42 @@ export default function BatchAddProperty({ toast, draft }) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="eyebrow">Step 1 · Batch intake</div>
-          <h1 className="page-title">Batch add properties</h1>
-          <p className="page-sub">
-            Paste a stack of PropertyGuru links. We'll extract each, stream the rows into the table, and let you
-            edit, generate posters, and save — one at a time or all at once.
-          </p>
+      {!embedded && (
+        <div className="page-header">
+          <div>
+            <div className="eyebrow">Step 1 · Batch intake</div>
+            <h1 className="page-title">Batch add properties</h1>
+            <p className="page-sub">
+              Paste a stack of PropertyGuru links. We'll extract each, stream the rows into the table, and let you
+              edit, generate posters, and save — one at a time or all at once.
+            </p>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <label style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
-            Concurrency
-            <select
-              className="input"
-              style={{ marginLeft: 6, padding: '4px 8px', fontSize: 12 }}
-              value={maxParallel}
-              onChange={(e) => setMaxParallel(Number(e.target.value))}
-            >
-              <option value={1}>1</option>
-              <option value={2}>2</option>
-              <option value={3}>3</option>
-            </select>
-          </label>
-          <button type="button" className="btn btn-ghost" onClick={handleClear}>Clear batch</button>
-        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <label style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
+          Concurrency
+          <select
+            className="input"
+            style={{ marginLeft: 6, padding: '4px 8px', fontSize: 12 }}
+            value={maxParallel}
+            onChange={(e) => setMaxParallel(Number(e.target.value))}
+          >
+            <option value={1}>1</option>
+            <option value={2}>2</option>
+            <option value={3}>3</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          className={`btn ${paused ? 'btn-secondary' : 'btn-ghost'}`}
+          onClick={() => setPaused((p) => !p)}
+          title={paused ? 'Resume — new queued rows will start extracting' : 'Stop — no new rows will start; in-flight ones finish on their own'}
+        >
+          {paused ? 'Resume scrape' : 'Stop scrape'}
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={handleClear}>Clear batch</button>
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>
@@ -522,28 +532,19 @@ export default function BatchAddProperty({ toast, draft }) {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div className="card-head">
-          <h3 className="card-title">Paste PropertyGuru URLs</h3>
-          <p className="card-sub">
-            One per line, space-separated, or anything in between. Up to {MAX_ROWS} rows per batch. Image and
-            poster files live in memory only — a refresh clears them and any affected row returns to <em>queued</em>.
-          </p>
-        </div>
-        <div className="card-pad">
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="card-pad" style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
           <textarea
             className="input"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
-            placeholder={'https://www.propertyguru.com.sg/listing/...\nhttps://www.propertyguru.com.sg/listing/...'}
-            rows={4}
-            style={{ width: '100%', fontFamily: 'inherit' }}
+            placeholder={`Paste PropertyGuru URLs (one per line, up to ${MAX_ROWS})`}
+            rows={2}
+            style={{ flex: 1, fontFamily: 'inherit', resize: 'vertical' }}
           />
-          <div style={{ marginTop: 8, display: 'flex', justifyContent: 'flex-end' }}>
-            <button type="button" className="btn btn-secondary" onClick={handleAddUrls}>
-              <Icon name="plus" size={12} /> Add to batch
-            </button>
-          </div>
+          <button type="button" className="btn btn-secondary" onClick={handleAddUrls} style={{ whiteSpace: 'nowrap' }}>
+            <Icon name="plus" size={12} /> Add to batch
+          </button>
         </div>
       </div>
 
@@ -554,14 +555,14 @@ export default function BatchAddProperty({ toast, draft }) {
             <div style={{ marginTop: 8, fontWeight: 600, color: 'var(--ink)' }}>No rows yet</div>
             <div style={{ fontSize: 13, marginTop: 4 }}>
               Paste PropertyGuru URLs above. Each link becomes one row — extraction begins automatically.
+              Up to {MAX_ROWS} rows per batch. Image and poster files live in memory only — a refresh clears them.
             </div>
           </div>
         </div>
       ) : (
-        <div className="card" style={{ padding: 0 }}>
-          <RowTableHeader />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {rows.map((row) => (
-            <RowItem
+            <RowCard
               key={row.id}
               row={row}
               onToggle={() => updateRow(row.id, (r) => ({ isExpanded: !r.isExpanded }))}
@@ -591,32 +592,18 @@ function Counter({ label, value, tone }) {
   )
 }
 
-function RowTableHeader() {
-  const cell = { fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-mute)', fontWeight: 600 }
+function Fact({ label, value }) {
   return (
-    <div style={{
-      display: 'grid',
-      gridTemplateColumns: '110px 1.6fr 0.8fr 0.7fr 0.9fr 0.6fr 0.5fr 0.8fr 260px',
-      gap: 12,
-      padding: '10px 16px',
-      background: 'var(--cream-2, #f6efe0)',
-      borderBottom: '1px solid var(--hairline)',
-      alignItems: 'center',
-    }}>
-      <div style={cell}>Status</div>
-      <div style={cell}>Condo · Title</div>
-      <div style={cell}>Rent</div>
-      <div style={cell}>Type</div>
-      <div style={cell}>Area</div>
-      <div style={cell}>Bd/Ba</div>
-      <div style={cell}>Imgs</div>
-      <div style={cell}>Poster</div>
-      <div style={cell}>Actions</div>
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--ink-mute)', fontWeight: 600 }}>{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={value || ''}>
+        {value || <span style={{ color: 'var(--ink-mute)' }}>—</span>}
+      </div>
     </div>
   )
 }
 
-function RowItem({
+function RowCard({
   row, onToggle, onSetCondo, onSetPrimaryUni, onSetField, onSetCommute,
   onGeneratePoster, onSave, onRemove, onRequeue,
 }) {
@@ -626,44 +613,26 @@ function RowItem({
   const isBusy = row.status === 'extracting' || row.status === 'fetching_images' ||
                  row.status === 'generating_poster' || row.status === 'saving'
   const fieldsStaleVsPoster = row.posterGeneratedAt > 0 && row.lastEditedAt > row.posterGeneratedAt
+  const bdba = e.bedrooms != null || e.bathrooms != null ? `${e.bedrooms ?? '?'} / ${e.bathrooms ?? '?'}` : null
 
   return (
-    <>
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: '110px 1.6fr 0.8fr 0.7fr 0.9fr 0.6fr 0.5fr 0.8fr 260px',
-        gap: 12,
-        padding: '12px 16px',
-        borderBottom: '1px solid var(--hairline)',
-        alignItems: 'center',
-        background: isLocked ? '#fafdf7' : '#fff',
-      }}>
-        <div>
-          <StatusPill status={row.status} />
-        </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontWeight: 600, color: 'var(--navy)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {row.condo || <span style={{ color: 'var(--ink-mute)', fontWeight: 500 }}>(no name)</span>}
+    <div className="card" style={{ padding: 0, background: isLocked ? '#fafdf7' : '#fff', overflow: 'hidden' }}>
+      <div style={{ padding: '12px 16px 10px', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 4 }}>
+            <StatusPill status={row.status} />
+            <div style={{ fontWeight: 700, color: 'var(--navy)', fontSize: 15 }}>
+              {row.condo || <span style={{ color: 'var(--ink-mute)', fontWeight: 500 }}>(no name)</span>}
+            </div>
+            {typeof e.rentSGD === 'number' && (
+              <div style={{ fontWeight: 700, color: 'var(--ink)', fontSize: 14 }}>S${e.rentSGD}/mo</div>
+            )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--ink-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.listingTitle || row.url}>
-            {e.listingTitle || row.url}
+          <div style={{ fontSize: 12, color: 'var(--ink-soft)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={e.listingTitle || row.url}>
+            {e.listingTitle || (
+              <a href={row.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ink-soft)' }}>{row.url}</a>
+            )}
           </div>
-        </div>
-        <div style={{ fontSize: 13 }}>{typeof e.rentSGD === 'number' ? `S$${e.rentSGD}` : '—'}</div>
-        <div style={{ fontSize: 13 }}>{e.housingType || e.buildingType || '—'}</div>
-        <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.area || '—'}</div>
-        <div style={{ fontSize: 13 }}>
-          {e.bedrooms != null || e.bathrooms != null ? `${e.bedrooms ?? '?'}/${e.bathrooms ?? '?'}` : '—'}
-        </div>
-        <div style={{ fontSize: 13 }}>{row.images.length}</div>
-        <div style={{ fontSize: 13 }}>
-          {row.posterFile ? (
-            row.posterPreviewUrl ? (
-              <a href={row.posterPreviewUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--navy)' }}>
-                PDF ↗
-              </a>
-            ) : 'PDF'
-          ) : '—'}
         </div>
         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {!isLocked && (
@@ -708,11 +677,70 @@ function RowItem({
         </div>
       </div>
 
+      {row.images.length > 0 && (
+        <div style={{
+          display: 'flex',
+          gap: 6,
+          padding: '0 16px 10px',
+          overflowX: 'auto',
+        }}>
+          {row.images.slice(0, 8).map((img) => (
+            <img
+              key={img.previewUrl}
+              src={img.previewUrl}
+              alt={img.name}
+              style={{
+                width: 96,
+                height: 72,
+                objectFit: 'cover',
+                borderRadius: 4,
+                border: '1px solid var(--hairline)',
+                flexShrink: 0,
+              }}
+            />
+          ))}
+          {row.images.length > 8 && (
+            <div style={{
+              width: 96, height: 72, borderRadius: 4, border: '1px dashed var(--hairline)',
+              display: 'grid', placeItems: 'center', fontSize: 12, color: 'var(--ink-soft)', flexShrink: 0,
+            }}>
+              +{row.images.length - 8} more
+            </div>
+          )}
+        </div>
+      )}
+
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))',
+        gap: 10,
+        padding: '0 16px 12px',
+      }}>
+        <Fact label="Type" value={[e.housingType, e.buildingType].filter(Boolean).join(' · ') || (e.unitType || '')} />
+        <Fact label="Area" value={e.area} />
+        <Fact label="Bd / Ba" value={bdba} />
+        <Fact label="Size" value={typeof e.sizeSqft === 'number' ? `${e.sizeSqft} sqft` : null} />
+        <Fact label="Age" value={typeof e.ageYears === 'number' ? `${e.ageYears} yr` : null} />
+        <Fact label="Furnishing" value={e.furnishing} />
+        <Fact label="Availability" value={e.availability} />
+        <Fact label="Commute (NUS/NTU/SMU)" value={e.commuteMins ? `${e.commuteMins.NUS ?? '?'} / ${e.commuteMins.NTU ?? '?'} / ${e.commuteMins.SMU ?? '?'}` : null} />
+        <Fact label="Images" value={row.images.length ? `${row.images.length}` : null} />
+        <Fact label="Poster" value={row.posterFile ? 'attached' : null} />
+      </div>
+
+      {row.posterPreviewUrl && (
+        <div style={{ padding: '0 16px 10px', fontSize: 12 }}>
+          <a href={row.posterPreviewUrl} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--navy)' }}>
+            <Icon name="pdf" size={11} /> View poster PDF ↗
+          </a>
+        </div>
+      )}
+
       {(row.error || row.skippedReason || fieldsStaleVsPoster) && (
         <div style={{
-          padding: '6px 16px',
+          padding: '8px 16px',
           background: row.error ? '#fff5f5' : '#fffaeb',
-          borderBottom: '1px solid var(--hairline)',
+          borderTop: '1px solid var(--hairline)',
           fontSize: 12,
           color: row.error ? '#a82323' : '#7a5500',
         }}>
@@ -725,7 +753,7 @@ function RowItem({
       )}
 
       {row.isExpanded && !isLocked && (
-        <div style={{ padding: '12px 16px 18px', borderBottom: '1px solid var(--hairline)', background: '#fafaf7' }}>
+        <div style={{ padding: '12px 16px 18px', borderTop: '1px solid var(--hairline)', background: '#fafaf7' }}>
           <div style={{ marginBottom: 10, display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: 'var(--ink-soft)' }}>
               Source: <a href={row.url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--navy)' }}>{row.url}</a>
@@ -806,23 +834,6 @@ function RowItem({
               <input className="input" type="number" min="0" value={e.commuteMins?.SMU ?? ''} onChange={(ev) => onSetCommute('SMU', ev.target.value)} />
             </Field>
           </div>
-          {row.images.length > 0 && (
-            <div style={{ marginTop: 12 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
-                Extracted images ({row.images.length})
-              </div>
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {row.images.map((img) => (
-                  <img
-                    key={img.previewUrl}
-                    src={img.previewUrl}
-                    alt={img.name}
-                    style={{ width: 80, height: 60, objectFit: 'cover', borderRadius: 4, border: '1px solid var(--hairline)' }}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
           {blockers.length > 0 && (
             <div style={{ marginTop: 10, fontSize: 12, color: 'var(--orange)' }}>
               Poster blockers: <strong>{blockers.join(', ')}</strong>
@@ -830,6 +841,6 @@ function RowItem({
           )}
         </div>
       )}
-    </>
+    </div>
   )
 }

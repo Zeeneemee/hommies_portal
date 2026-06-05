@@ -3,6 +3,9 @@ import { useMutation, useAction } from 'convex/react'
 import { Icon, Field } from './ui.jsx'
 import { renderPosterToBlob } from '../poster/generate.jsx'
 import { resizeImageToJpeg, blobToBase64 } from '../poster/encode.js'
+import BatchAddProperty from './BatchAddProperty.jsx'
+
+const MODE_KEY = 'hommies.addProperty.mode'
 
 // Screen 1 — radically simplified.
 //
@@ -18,7 +21,68 @@ const IMAGE_CAP = 12
 const VIDEO_MAX_BYTES = 200 * 1024 * 1024
 const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
 
-export default function AddProperty({ toast, onSaved, draft }) {
+export default function AddProperty({ toast, onSaved, draft, batchDraft }) {
+  const [mode, setMode] = React.useState(() => {
+    try { return window.localStorage.getItem(MODE_KEY) === 'batch' ? 'batch' : 'single' } catch { return 'single' }
+  })
+  React.useEffect(() => {
+    try { window.localStorage.setItem(MODE_KEY, mode) } catch {}
+  }, [mode])
+
+  if (mode === 'batch') {
+    return (
+      <>
+        <ModeHeader mode={mode} setMode={setMode} batchCount={batchDraft?.rows?.length || 0} />
+        <BatchAddProperty toast={toast} draft={batchDraft} embedded />
+      </>
+    )
+  }
+
+  return (
+    <>
+      <ModeHeader mode={mode} setMode={setMode} batchCount={batchDraft?.rows?.length || 0} />
+      <AddPropertySingle toast={toast} onSaved={onSaved} draft={draft} />
+    </>
+  )
+}
+
+function ModeHeader({ mode, setMode, batchCount }) {
+  return (
+    <div className="page-header">
+      <div>
+        <div className="eyebrow">Step 1 · Intake</div>
+        <h1 className="page-title">Add a property</h1>
+        <p className="page-sub">
+          {mode === 'batch'
+            ? 'Paste a stack of PropertyGuru links — we extract each, stream rows in, and let you generate posters and save one at a time or all at once.'
+            : 'Drop the name and the photos in. Paste a PropertyGuru link to auto-fill the rest, generate the poster, and save.'}
+        </p>
+      </div>
+      <div className="segment" role="tablist" aria-label="Intake mode">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'single'}
+          className={mode === 'single' ? 'on' : ''}
+          onClick={() => setMode('single')}
+        >
+          Single
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={mode === 'batch'}
+          className={mode === 'batch' ? 'on' : ''}
+          onClick={() => setMode('batch')}
+        >
+          Batch{batchCount ? ` (${batchCount})` : ''}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function AddPropertySingle({ toast, onSaved, draft }) {
   const addProperty = useMutation('properties:add')
   const generateUploadUrl = useMutation('properties:generateUploadUrl')
   const extractPosterDetails = useAction('extraction:extractPosterDetails')
@@ -453,25 +517,14 @@ export default function AddProperty({ toast, onSaved, draft }) {
 
   return (
     <form onSubmit={handleSubmit}>
-      <div className="page-header">
-        <div>
-          <div className="eyebrow">Step 1 · Intake</div>
-          <h1 className="page-title">Add a property</h1>
-          <p className="page-sub">
-            Drop the name and the photos in. Generate the brief for{' '}
-            <strong style={{ color: 'var(--navy)' }}>/room-showcase-pdf</strong>, paste it into a Claude chat, and
-            upload the poster back here — the rest of the property's details get lifted from the PDF for you.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            onClick={() => draft.reset()}
-          >
-            Clear
-          </button>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+        <button
+          type="button"
+          className="btn btn-ghost"
+          onClick={() => draft.reset()}
+        >
+          Clear
+        </button>
       </div>
 
       <div className="card" style={{ marginBottom: 18 }}>
