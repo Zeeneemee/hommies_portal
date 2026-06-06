@@ -111,7 +111,6 @@ export default function StatusScreen({ toast, properties }) {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Step 2 · Pipeline</div>
           <h1 className="page-title">Status</h1>
           <p className="page-sub">
             Every property moves through three stages. No surprises — the same track for every unit, every agent.

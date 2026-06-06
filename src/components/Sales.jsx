@@ -53,11 +53,10 @@ export default function SalesScreen({ toast, deals = [] }) {
 
   return (
     <div className="sales-screen">
-      <div className="page-head">
+      <div className="page-header">
         <div>
-          <div className="eyebrow">Sales</div>
           <h1 className="page-title">Sales</h1>
-          <p className="muted">
+          <p className="page-sub">
             Closed deals — every moved-in lease, plus the running monthly rent.
           </p>
         </div>

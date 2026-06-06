@@ -892,7 +892,10 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   border-radius: var(--radius-l);
   overflow: hidden;
   display: flex; flex-direction: column;
+  min-width: 0;
 }
+.listing-name { word-break: break-word; overflow-wrap: anywhere; }
+.listing-foot > div:last-child { flex-wrap: wrap; }
 .listing-hero {
   height: 130px;
   background:
@@ -1285,16 +1288,25 @@ video.listing-hero-img {
 
 /* Mobile — drawer sidebar, single-column everything. */
 @media (max-width: 768px) {
-  body { font-size: 13.5px; }
-
-  .app { grid-template-columns: 1fr; }
+  body { font-size: 13.5px; overflow-x: hidden; }
+  html { overflow-x: hidden; }
+  .app {
+    grid-template-columns: 1fr;
+    min-width: 0;
+    grid-auto-rows: max-content;
+    align-content: start;
+  }
+  .main { min-width: 0; max-width: 100%; overflow-x: clip; }
+  .page-sub { overflow-wrap: anywhere; }
+  .brand-logo--sm { max-height: 28px; max-width: 108px; padding: 3px 6px; border-radius: 6px; }
 
   /* Mobile top bar */
   .mobile-top {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 12px 14px;
+    gap: 8px;
+    height: 50px;
+    padding: 0 14px;
     background: var(--navy);
     color: #fff;
     position: sticky;
@@ -1306,8 +1318,8 @@ video.listing-hero-img {
     background: rgba(255,255,255,0.10);
     border: 0;
     color: #fff;
-    padding: 7px;
-    border-radius: 8px;
+    padding: 5px;
+    border-radius: 7px;
     display: grid;
     place-items: center;
     cursor: pointer;
@@ -1324,11 +1336,7 @@ video.listing-hero-img {
     box-shadow: 0 0 0 2px rgba(253,105,37,0.18);
   }
   .mobile-top-screen {
-    margin-left: auto;
-    font-size: 12px;
-    color: rgba(255,255,255,0.6);
-    font-weight: 500;
-    white-space: nowrap;
+    display: none;
   }
 
   /* Sidebar becomes an off-canvas drawer. */
@@ -1364,9 +1372,12 @@ video.listing-hero-img {
     gap: 12px;
     margin-bottom: 18px;
   }
-  .page-header > div:last-child { /* button row */
+  .page-header > div:first-child { text-align: center; }
+  .page-header > div:first-child .page-sub { margin-left: auto; margin-right: auto; }
+  .page-header > div:first-child ~ div { /* button / stats row (only when present) */
     display: flex;
     flex-wrap: wrap;
+    justify-content: center;
     gap: 8px !important;
   }
   .page-title { font-size: 24px; }
@@ -1430,8 +1441,24 @@ video.listing-hero-img {
   /* Property picker — list grows to full width */
   .property-picker-list { max-height: 280px; overflow-y: auto; }
 
+  /* Compact stat cards (Sales / CustomerDetail hero counts) */
+  .hero-count { padding: 6px 10px; gap: 8px; }
+  .hero-count-num { font-size: 17px; }
+  .hero-count-label { font-size: 9.5px; letter-spacing: 0.1em; }
+  .sales-stats { gap: 8px; width: 100%; }
+  .sales-stats .hero-count { flex: 1 1 0; min-width: 0; }
+
   /* Listings */
-  .listings-grid { grid-template-columns: 1fr; gap: 14px; }
+  .listings-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+  .listing-foot { flex-wrap: wrap; row-gap: 6px; }
+  .listing-actions { flex-wrap: wrap; }
+  .listing-actions .btn {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+    white-space: normal;
+    word-break: break-word;
+    padding: 8px 10px;
+  }
   .listings-bar { gap: 10px; margin-bottom: 14px; }
   /* Chip rail keeps single line + horizontal scroll on phones — overrides flex-wrap. */
   .chip-rail { flex-wrap: nowrap; }

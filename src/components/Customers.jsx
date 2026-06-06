@@ -190,7 +190,6 @@ export default function CustomersScreen({ toast, responses, properties = [] }) {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Step 5 · People</div>
           <h1 className="page-title">Customers</h1>
           <p className="page-sub">
             Everyone the portal can match a property to. Click a card to open the customer's page and mark which

@@ -50,7 +50,6 @@ function ModeHeader({ mode, setMode, batchCount }) {
   return (
     <div className="page-header">
       <div>
-        <div className="eyebrow">Step 1 · Intake</div>
         <h1 className="page-title">Add a property</h1>
         <p className="page-sub">
           {mode === 'batch'

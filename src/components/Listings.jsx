@@ -125,7 +125,6 @@ export default function ListingsScreen({ properties, toast }) {
     <div>
       <div className="page-header">
         <div>
-          <div className="eyebrow">Step 4 · Inventory</div>
           <h1 className="page-title">Listings</h1>
           <p className="page-sub">
             Every property as its collection of assets — photos, poster, and the facts lifted from the poster.

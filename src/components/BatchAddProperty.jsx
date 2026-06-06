@@ -471,7 +471,6 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
       {!embedded && (
         <div className="page-header">
           <div>
-            <div className="eyebrow">Step 1 · Batch intake</div>
             <h1 className="page-title">Batch add properties</h1>
             <p className="page-sub">
               Paste a stack of PropertyGuru links. We'll extract each, stream the rows into the table, and let you

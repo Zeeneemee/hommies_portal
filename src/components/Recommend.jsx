@@ -229,7 +229,6 @@ function Header({ viewMode, onViewMode, hideToggle, actions }) {
   return (
     <div className="page-header">
       <div>
-        <div className="eyebrow">Step 3 · Match</div>
         <h1 className="page-title">Recommend</h1>
         <p className="page-sub">
           Two ways to look at the same matches — pick a property to see who to send it to, or pick a customer to see

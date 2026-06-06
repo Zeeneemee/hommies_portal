@@ -20,6 +20,17 @@ import logoUrl from './assets/logo.png'
 
 const CHAT_INTAKE_ENABLED = import.meta.env.VITE_ENABLE_CHAT_INTAKE === 'true'
 
+// Resets window scroll to the top whenever the route changes. Without this
+// react-router preserves the previous page's scroll position, which feels
+// broken when navigating from a deep customer detail back to the list.
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  React.useEffect(() => {
+    window.scrollTo(0, 0)
+  }, [pathname])
+  return null
+}
+
 const NAV = [
   { id: 'add', to: '/add', label: 'Add Property', step: 1 },
   ...(CHAT_INTAKE_ENABLED
@@ -259,6 +270,7 @@ export default function App() {
         <div className="sidebar-backdrop" onClick={closeNav} aria-hidden="true" />
       )}
 
+      <ScrollToTop />
       <main className="main" data-screen-label={activeLabel}>
         <Routes>
           <Route path="/" element={<Navigate to="/add" replace />} />
