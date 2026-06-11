@@ -776,7 +776,7 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
 .more-filters-toggle.on .more-filters-dot { box-shadow: 0 0 0 2px var(--navy); }
 
 /* Row 2: horizontally-scrollable chip rail */
-.filter-chips { display: flex; gap: 8px; }
+.filter-chips { display: flex; gap: 8px; flex-wrap: wrap; }
 .chip-rail {
   overflow-x: auto;
   overflow-y: hidden;
@@ -910,6 +910,12 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
 }
 .listing-body { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
 .listing-name { font-family: var(--font-display); font-size: 18px; font-weight: 600; color: var(--navy); letter-spacing: -0.01em; line-height: 1.2; }
+.listing-bedbath {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink-soft); font-weight: 500;
+  margin-top: -4px;
+}
+.listing-bedbath > [aria-hidden="true"] { color: var(--ink-mute); }
 .listing-facts {
   display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
   padding: 10px 0;
@@ -1797,6 +1803,16 @@ video.listing-hero-img {
   .customer-stats { grid-template-columns: 1fr 1fr; }
   .customer-stats .customer-stat:first-child { grid-column: span 2; }
   .customers-grid { grid-template-columns: 1fr; }
+  /* Page header stacks: title above, totals + action below.
+     Without this the title compresses and the totals overflow. */
+  .page-header { flex-wrap: wrap; align-items: flex-start; gap: 16px; }
+  .customers-header-side { width: 100%; justify-content: space-between; }
+  .page-title { font-size: 28px; }
+  .page-sub { font-size: 13px; }
+  /* Refine inputs shouldn't push the row wider than the card. */
+  .customer-refine { grid-template-columns: 1fr; }
+  .customer-refine-chips .input-sm { max-width: none; flex: 1 1 90px; min-width: 0; }
+  .customer-refine-reset { justify-self: stretch; text-align: right; }
 }
 
 /* ============ STATUS ROW — extraction meta + stacked actions ============ */

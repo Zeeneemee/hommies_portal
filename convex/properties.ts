@@ -26,6 +26,8 @@ const propertyAddArgs = {
   housingType: v.optional(v.union(v.literal('Room'), v.literal('Whole Unit'))),
   masterCount: v.optional(v.number()),
   commonCount: v.optional(v.number()),
+  bedrooms: v.optional(v.number()),
+  bathrooms: v.optional(v.number()),
   fullAddress: v.optional(v.string()),
   commuteMins: v.optional(
     v.object({ NUS: v.number(), NTU: v.number(), SMU: v.number() }),
@@ -151,6 +153,8 @@ export const update = mutation({
       housingType: v.optional(v.union(v.literal('Room'), v.literal('Whole Unit'))),
       masterCount: v.optional(v.number()),
       commonCount: v.optional(v.number()),
+      bedrooms: v.optional(v.number()),
+      bathrooms: v.optional(v.number()),
       fullAddress: v.optional(v.string()),
       commuteMins: v.optional(
         v.object({ NUS: v.number(), NTU: v.number(), SMU: v.number() }),

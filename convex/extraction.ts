@@ -678,13 +678,8 @@ export const extractPosterDetails = action({
       posterExtractionOk: Object.keys(fields).length > 0,
     }
     if (usedGemini) patch.posterExtractionRaw = `${patch.posterExtractionRaw}\n\n[gemini] ${geminiNote || '(no note)'}`
-    // Fields the sanitiser uses internally to fire the master/common
-    // fallback but the `properties` schema doesn't persist. Strip them so
-    // `properties:update`'s validator doesn't reject the whole patch.
-    const EPHEMERAL_FIELDS = new Set(['bedrooms', 'bathrooms'])
     for (const [k, v] of Object.entries(fields)) {
       if (v === undefined) continue
-      if (EPHEMERAL_FIELDS.has(k)) continue
       patch[k] = v
     }
 

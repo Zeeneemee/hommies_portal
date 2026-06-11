@@ -33,6 +33,8 @@ export default function ListingsScreen({ properties, toast }) {
   const [debouncedSearch, setDebouncedSearch] = React.useState('')
   const [rentMin, setRentMin] = React.useState('')
   const [rentMax, setRentMax] = React.useState('')
+  const [beds, setBeds] = React.useState('Any')
+  const [baths, setBaths] = React.useState('Any')
   const [housing, setHousing] = React.useState('All')
   const [statusFilter, setStatusFilter] = React.useState('All')
   const [editingId, setEditingId] = React.useState(null)
@@ -77,6 +79,14 @@ export default function ListingsScreen({ properties, toast }) {
     if (max != null && p.rentSGD > max) return false
     return true
   }
+  const matchesCount = (val, selection) => {
+    if (selection === 'Any') return true
+    if (val == null) return false
+    if (selection.endsWith('+')) return val >= Number(selection.slice(0, -1))
+    return val === Number(selection)
+  }
+  const matchesBeds = (p) => matchesCount(p.bedrooms, beds)
+  const matchesBaths = (p) => matchesCount(p.bathrooms, baths)
   const matchesHousing = (p) => housing === 'All' || p.housingType === housing
   const matchesStatus = (p) => statusFilter === 'All' || p.status === statusFilter
 
@@ -85,6 +95,8 @@ export default function ListingsScreen({ properties, toast }) {
       matchesChip(p) &&
       matchesSearch(p) &&
       matchesRent(p) &&
+      matchesBeds(p) &&
+      matchesBaths(p) &&
       matchesHousing(p) &&
       matchesStatus(p),
   )
@@ -97,7 +109,12 @@ export default function ListingsScreen({ properties, toast }) {
   const editing = editingId ? properties.find((p) => p._id === editingId) : null
 
   const advancedActive =
-    rentMin !== '' || rentMax !== '' || housing !== 'All' || statusFilter !== 'All'
+    rentMin !== '' ||
+    rentMax !== '' ||
+    beds !== 'Any' ||
+    baths !== 'Any' ||
+    housing !== 'All' ||
+    statusFilter !== 'All'
   const filtersActive = debouncedSearch !== '' || advancedActive || filter !== 'All'
   const [showAdvanced, setShowAdvanced] = React.useState(false)
   React.useEffect(() => {
@@ -109,6 +126,8 @@ export default function ListingsScreen({ properties, toast }) {
     setSearch('')
     setRentMin('')
     setRentMax('')
+    setBeds('Any')
+    setBaths('Any')
     setHousing('All')
     setStatusFilter('All')
   }
@@ -208,6 +227,31 @@ export default function ListingsScreen({ properties, toast }) {
                 aria-label="Maximum rent"
               />
             </div>
+            <select
+              className="select select-sm"
+              value={beds}
+              onChange={(e) => setBeds(e.target.value)}
+              aria-label="Bedrooms"
+            >
+              <option value="Any">Beds: Any</option>
+              <option value="1">1 bed</option>
+              <option value="2">2 beds</option>
+              <option value="3">3 beds</option>
+              <option value="4">4 beds</option>
+              <option value="5+">5+ beds</option>
+            </select>
+            <select
+              className="select select-sm"
+              value={baths}
+              onChange={(e) => setBaths(e.target.value)}
+              aria-label="Bathrooms"
+            >
+              <option value="Any">Baths: Any</option>
+              <option value="1">1 bath</option>
+              <option value="2">2 baths</option>
+              <option value="3">3 baths</option>
+              <option value="4+">4+ baths</option>
+            </select>
             <select
               className="select select-sm"
               value={housing}
@@ -468,6 +512,24 @@ function ListingCard({ property: p, orphan, closed, onEdit, onOpenInRecommend, t
 
       <div className="listing-body">
         <div className="listing-name">{p.condo}</div>
+
+        {(typeof p.bedrooms === 'number' || typeof p.bathrooms === 'number') && (
+          <div className="listing-bedbath">
+            {typeof p.bedrooms === 'number' && (
+              <span>
+                {p.bedrooms} bed{p.bedrooms === 1 ? '' : 's'}
+              </span>
+            )}
+            {typeof p.bedrooms === 'number' && typeof p.bathrooms === 'number' && (
+              <span aria-hidden="true">·</span>
+            )}
+            {typeof p.bathrooms === 'number' && (
+              <span>
+                {p.bathrooms} bath{p.bathrooms === 1 ? '' : 's'}
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="listing-foot">
           <div className="rent">

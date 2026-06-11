@@ -37,6 +37,8 @@ export default defineSchema({
     // (Gemini drafts in extraction, operator edits in ListingEditModal).
     masterCount: v.optional(v.number()),
     commonCount: v.optional(v.number()),
+    bedrooms: v.optional(v.number()),
+    bathrooms: v.optional(v.number()),
     fullAddress: v.optional(v.string()),
     commuteMins: v.optional(
       v.object({

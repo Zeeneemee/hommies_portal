@@ -273,21 +273,44 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
 
   const [search, setSearch] = React.useState('')
   const [debouncedSearch, setDebouncedSearch] = React.useState('')
+  const [beds, setBeds] = React.useState('Any')
+  const [baths, setBaths] = React.useState('Any')
+  const [showAdvanced, setShowAdvanced] = React.useState(false)
   React.useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim().toLowerCase()), 200)
     return () => clearTimeout(t)
   }, [search])
 
+  const advancedActive = beds !== 'Any' || baths !== 'Any'
+  React.useEffect(() => {
+    if (advancedActive) setShowAdvanced(true)
+  }, [advancedActive])
+
+  const matchesCount = (val, selection) => {
+    if (selection === 'Any') return true
+    if (val == null) return false
+    if (selection.endsWith('+')) return val >= Number(selection.slice(0, -1))
+    return val === Number(selection)
+  }
+
   const visible = React.useMemo(() => {
-    if (!debouncedSearch) return matchable
     return matchable.filter((p) => {
+      if (!matchesCount(p.bedrooms, beds)) return false
+      if (!matchesCount(p.bathrooms, baths)) return false
+      if (!debouncedSearch) return true
       const hay = [p.condo, p.area, p.unitType, p.rentSGD != null ? String(p.rentSGD) : '']
         .filter(Boolean)
         .join(' ')
         .toLowerCase()
       return hay.includes(debouncedSearch)
     })
-  }, [matchable, debouncedSearch])
+  }, [matchable, debouncedSearch, beds, baths])
+
+  const clearPropertyFilters = () => {
+    setSearch('')
+    setBeds('Any')
+    setBaths('Any')
+  }
 
   const [selectedId, setSelectedId] = React.useState(
     initialPropertyId && matchable.find((p) => p._id === initialPropertyId)
@@ -367,12 +390,62 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
           </p>
         </div>
         <div className="card-pad" style={{ paddingTop: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <input
-            className="input"
-            placeholder="Search condo, area, unit type, or rent…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <div className="listings-search-row" style={{ marginBottom: 0 }}>
+            <input
+              className="input"
+              style={{ flex: '1 1 auto' }}
+              placeholder="Search condo, area, unit type, or rent…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            <button
+              type="button"
+              className={`more-filters-toggle ${showAdvanced ? 'on' : ''} ${advancedActive ? 'has-active' : ''}`}
+              onClick={() => setShowAdvanced((s) => !s)}
+              aria-expanded={showAdvanced}
+              aria-label="Toggle bed/bath filters"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M6 12h12M10 18h4" />
+              </svg>
+              <span className="more-filters-label">Filters</span>
+              {advancedActive && <span className="more-filters-dot" aria-hidden="true" />}
+            </button>
+          </div>
+          {showAdvanced && (
+            <div className="listings-extra-filters" style={{ marginTop: 0 }}>
+              <select
+                className="select select-sm"
+                value={beds}
+                onChange={(e) => setBeds(e.target.value)}
+                aria-label="Bedrooms"
+              >
+                <option value="Any">Beds: Any</option>
+                <option value="1">1 bed</option>
+                <option value="2">2 beds</option>
+                <option value="3">3 beds</option>
+                <option value="4">4 beds</option>
+                <option value="5+">5+ beds</option>
+              </select>
+              <select
+                className="select select-sm"
+                value={baths}
+                onChange={(e) => setBaths(e.target.value)}
+                aria-label="Bathrooms"
+              >
+                <option value="Any">Baths: Any</option>
+                <option value="1">1 bath</option>
+                <option value="2">2 baths</option>
+                <option value="3">3 baths</option>
+                <option value="4+">4+ baths</option>
+              </select>
+              {(advancedActive || debouncedSearch) && (
+                <button type="button" className="link-btn" onClick={clearPropertyFilters}>
+                  Clear
+                </button>
+              )}
+            </div>
+          )}
           <div className="property-picker-list">
             {visible.length === 0 ? (
               <div className="muted" style={{ padding: 14, fontSize: 13 }}>

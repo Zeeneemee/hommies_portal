@@ -76,8 +76,9 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
     condo: property.condo || '',
     rentSGD: property.rentSGD ?? '',
     buildingType: property.buildingType || '',
-    unitType: property.unitType || '',
     housingType: property.housingType || '',
+    bedrooms: property.bedrooms ?? '',
+    bathrooms: property.bathrooms ?? '',
     masterCount: property.masterCount ?? '',
     commonCount: property.commonCount ?? '',
     area: property.area || '',
@@ -97,6 +98,11 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
     const t = (v ?? '').toString().trim()
     return t.length ? t : undefined
   }
+  const countOrUndef = (v) => {
+    const n = numOrUndef(v)
+    if (n == null) return undefined
+    return Math.max(0, Math.floor(n))
+  }
 
   const [busy, setBusy] = React.useState(false)
   async function handleSubmit(e) {
@@ -107,9 +113,10 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
       rentSGD: numOrUndef(f.rentSGD),
       buildingType:
         f.buildingType === 'Condo' || f.buildingType === 'HDB' ? f.buildingType : undefined,
-      unitType: strOrUndef(f.unitType),
       housingType:
         f.housingType === 'Room' || f.housingType === 'Whole Unit' ? f.housingType : undefined,
+      bedrooms: countOrUndef(f.bedrooms),
+      bathrooms: countOrUndef(f.bathrooms),
       area: strOrUndef(f.area),
       ageYears: numOrUndef(f.ageYears),
       fullAddress: strOrUndef(f.fullAddress),
@@ -215,14 +222,6 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
               />
             </Field>
 
-            <Field label="Room / unit type" span={6}>
-              <input
-                className="input"
-                value={f.unitType}
-                onChange={(e) => upd('unitType', e.target.value)}
-                placeholder="e.g. 1 Bedroom / 1 Bathroom"
-              />
-            </Field>
             <Field label="Housing type" span={6}>
               <Segment
                 options={['Room', 'Whole Unit']}
@@ -230,11 +229,33 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
                 onChange={(v) => upd('housingType', v)}
               />
             </Field>
+            <Field label="Bedrooms" span={3}>
+              <input
+                className="input"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                value={f.bedrooms}
+                onChange={(e) => upd('bedrooms', e.target.value)}
+                placeholder="e.g. 3"
+              />
+            </Field>
+            <Field label="Bathrooms" span={3}>
+              <input
+                className="input"
+                inputMode="numeric"
+                min="0"
+                step="1"
+                value={f.bathrooms}
+                onChange={(e) => upd('bathrooms', e.target.value)}
+                placeholder="e.g. 2"
+              />
+            </Field>
 
             {f.housingType === 'Whole Unit' && (
               <Field
                 label="Bedroom composition (master / common)"
-                hint="Drives the per-person rent split for group customers"
+                hint="Drives the per-person rent split for group customers — should sum to Bedrooms above"
                 span={12}
               >
                 <div style={{ display: 'flex', gap: 8 }}>
