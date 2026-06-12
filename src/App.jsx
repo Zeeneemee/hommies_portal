@@ -10,6 +10,7 @@ import CustomersScreen from './components/Customers.jsx'
 import CustomerDetail from './components/CustomerDetail.jsx'
 import SalesScreen from './components/Sales.jsx'
 import PipelineScreen from './components/Pipeline.jsx'
+import DailyBrief from './components/DailyBrief.jsx'
 import { Toast, Icon } from './components/ui.jsx'
 import logoUrl from './assets/logo.png'
 
@@ -32,6 +33,7 @@ function ScrollToTop() {
 }
 
 const NAV = [
+  { id: 'brief', to: '/brief', label: 'Daily Brief', step: '◆' },
   { id: 'add', to: '/add', label: 'Add Property', step: 1 },
   ...(CHAT_INTAKE_ENABLED
     ? [{ id: 'add-chat', to: '/add/chat', label: 'Add (chat) · beta', step: '★' }]
@@ -179,6 +181,7 @@ export default function App() {
   if (!linked) return <NotLinkedNotice />
 
   const counts = {
+    brief: '',
     add: batchDraft.rows.length || '',
     'add-chat': '',
     status: properties.length,
@@ -274,6 +277,7 @@ export default function App() {
       <main className="main" data-screen-label={activeLabel}>
         <Routes>
           <Route path="/" element={<Navigate to="/add" replace />} />
+          <Route path="/brief" element={<DailyBrief toast={toast} />} />
           <Route
             path="/add"
             element={

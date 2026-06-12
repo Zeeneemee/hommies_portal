@@ -227,6 +227,30 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   gap: 16px;
 }
 .field { display: flex; flex-direction: column; gap: 6px; }
+
+/* Manual customer add/edit modal — give the dense form room to breathe.
+   The 640px card is too tight for the default 12-col grid (segments truncate,
+   prefixed number inputs collapse), so this modal uses a clean 2-up at every
+   width: selects, dates and segments span the full row, while short paired
+   fields (channel/contact, commute/roommates, budget min/max) sit side by
+   side. The min-width:0 keeps prefixed number inputs from forcing overflow. */
+.manual-modal .form-grid {
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px 16px;
+}
+/* min-width:0 lets grid items shrink below their content's intrinsic width —
+   without it a select or prefixed input forces the column (and the modal) to
+   overflow horizontally on mobile. */
+.manual-modal .form-grid > .field { grid-column: span 2; min-width: 0; }
+.manual-modal .form-grid > .field.keep-half { grid-column: span 1; }
+.manual-modal .input-prefix { min-width: 0; }
+.manual-modal .input-prefix input { min-width: 0; width: 100%; }
+/* On the narrowest phones even the paired fields want the full row. */
+@media (max-width: 380px) {
+  .manual-modal .form-grid { gap: 14px 12px; }
+  .manual-modal .form-grid > .field.keep-half { grid-column: span 2; }
+}
+
 .field-label {
   font-size: 12px;
   font-weight: 600;
@@ -2847,3 +2871,296 @@ video.listing-hero-img {
   .chat-layout { grid-template-columns: 1fr; }
   .chat-sidebar { position: relative; top: 0; }
 }
+
+/* ── Daily Brief ─────────────────────────────────────────────────────── */
+.brief-screen { display: flex; flex-direction: column; gap: 18px; }
+
+.brief-daynav { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.brief-day-label { font-weight: 800; color: var(--ink); display: inline-flex; align-items: center; gap: 8px; }
+.brief-today-badge {
+  background: var(--green-soft); color: var(--green);
+  font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px;
+}
+
+.brief-seed {
+  background: #fff; border: 1px solid var(--hairline); border-radius: var(--radius-l);
+  padding: 28px; text-align: center; box-shadow: var(--shadow-card);
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+
+/* Board — one column per teammate */
+.brief-board {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+}
+.brief-col {
+  background: #fff; border: 1px solid var(--hairline); border-radius: var(--radius-l);
+  padding: 14px; display: flex; flex-direction: column; gap: 10px; box-shadow: var(--shadow-card);
+}
+.brief-col-head { display: flex; align-items: baseline; justify-content: space-between; }
+.brief-col-name { font-weight: 800; font-size: 15px; color: var(--ink); }
+.brief-col-count { font-size: 12px; color: var(--ink-mute); font-weight: 700; }
+
+.brief-quickadd { display: flex; gap: 6px; }
+.brief-quickadd .input { flex: 1; }
+
+.brief-tasks { display: flex; flex-direction: column; gap: 8px; min-height: 24px; }
+.brief-empty { color: var(--ink-mute); font-size: 13px; padding: 6px 2px; }
+
+.brief-task {
+  border: 1px solid var(--hairline); border-left: 3px solid var(--grey);
+  border-radius: var(--radius-s); padding: 8px 10px; background: var(--cream-2);
+}
+.brief-task--grey { border-left-color: var(--grey); }
+.brief-task--orange { border-left-color: var(--orange); }
+.brief-task--green { border-left-color: var(--green); }
+.brief-task--red { border-left-color: var(--danger); }
+.brief-task-top { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+.brief-task-title { font-weight: 700; font-size: 13px; color: var(--ink); }
+.brief-task-title.is-done { text-decoration: line-through; color: var(--ink-mute); }
+.brief-task-x {
+  border: none; background: none; color: var(--ink-mute); cursor: pointer; padding: 2px;
+  line-height: 0; border-radius: 4px;
+}
+.brief-task-x:hover { color: var(--danger); background: var(--danger-soft); }
+
+.brief-task-status { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.brief-chip {
+  border: 1px solid var(--hairline); background: #fff; color: var(--ink-soft);
+  font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 999px; cursor: pointer;
+}
+.brief-chip:hover { border-color: var(--hairline-strong); }
+.brief-chip--grey.on { background: var(--grey-soft); color: var(--ink); border-color: var(--grey); }
+.brief-chip--orange.on { background: var(--orange-soft); color: var(--orange); border-color: var(--orange); }
+.brief-chip--green.on { background: var(--green-soft); color: var(--green); border-color: var(--green); }
+.brief-chip--red.on { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.brief-src { display: block; margin-top: 4px; font-size: 10px; color: var(--ink-mute); font-style: italic; }
+
+.brief-standup { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.brief-standup .input { resize: vertical; }
+
+/* Phase plan + allocation shared header */
+.brief-phase, .brief-alloc {
+  background: #fff; border: 1px solid var(--hairline); border-radius: var(--radius-l);
+  padding: 16px; box-shadow: var(--shadow-card);
+}
+.brief-phase-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+.brief-phase-title { margin: 0; font-size: 18px; color: var(--ink); }
+.brief-phase-controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.brief-period { display: flex; align-items: center; gap: 8px; }
+.brief-period-key { font-weight: 800; font-variant-numeric: tabular-nums; min-width: 84px; text-align: center; }
+.brief-phase-text { width: 100%; resize: vertical; font-family: var(--font-sans); }
+.brief-phase-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 10px; }
+
+/* Customer allocation */
+.brief-alloc-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+.brief-alloc-col {
+  border: 1px solid var(--hairline); border-radius: var(--radius-m); padding: 10px;
+  display: flex; flex-direction: column; gap: 8px; background: var(--cream-2);
+}
+.brief-alloc-list { display: flex; flex-direction: column; gap: 8px; }
+.brief-alloc-row { display: flex; flex-direction: column; gap: 4px; }
+.brief-alloc-info { display: flex; flex-direction: column; }
+.brief-alloc-name { font-weight: 700; font-size: 13px; color: var(--ink); }
+
+@media (max-width: 1100px) {
+  .brief-board { grid-template-columns: repeat(2, 1fr); }
+  .brief-alloc-grid { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 620px) {
+  .brief-board { grid-template-columns: 1fr; }
+  .brief-alloc-grid { grid-template-columns: 1fr; }
+}
+
+/* Standup — tick-off checklist */
+.brief-standup { margin-top: auto; display: flex; flex-direction: column; gap: 6px; }
+.brief-standup-head { display: flex; align-items: baseline; justify-content: space-between; }
+.brief-standup-list { display: flex; flex-direction: column; gap: 4px; }
+.brief-su-item { display: flex; align-items: center; gap: 7px; }
+.brief-su-check {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: 5px;
+  border: 1.5px solid var(--hairline-strong); background: #fff; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff; padding: 0;
+}
+.brief-su-check:hover { border-color: var(--green); }
+.brief-su-check.on { background: var(--green); border-color: var(--green); }
+.brief-su-text { flex: 1; font-size: 13px; color: var(--ink); }
+.brief-su-item.is-done .brief-su-text { text-decoration: line-through; color: var(--ink-mute); }
+
+/* ── Daily Brief — tabs + Notion-style rows ──────────────────────────── */
+.brief-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--hairline); }
+.brief-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  border: none; background: none; cursor: pointer;
+  font: inherit; font-weight: 800; font-size: 14px; color: var(--ink-mute);
+  padding: 9px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.brief-tab:hover { color: var(--ink-soft); }
+.brief-tab.on { color: var(--ink); border-bottom-color: var(--orange); }
+
+/* Round tick control (tasks + checklists) */
+.brief-check {
+  flex: 0 0 auto; width: 18px; height: 18px; border-radius: 6px;
+  border: 1.5px solid var(--hairline-strong); background: #fff; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff; padding: 0;
+}
+.brief-check:hover { border-color: var(--green); }
+.brief-check.on { background: var(--green); border-color: var(--green); }
+.brief-check--ghost { border-style: dashed; color: var(--ink-mute); cursor: default; background: transparent; }
+
+.brief-row-x {
+  flex: 0 0 auto; border: none; background: none; color: var(--ink-mute);
+  cursor: pointer; padding: 2px; line-height: 0; border-radius: 4px; opacity: 0;
+}
+.brief-task-row:hover .brief-row-x, .brief-check-row:hover .brief-row-x { opacity: 1; }
+.brief-row-x:hover { color: var(--danger); background: var(--danger-soft); }
+
+/* Checklist (standup + phase) */
+.brief-checklist { display: flex; flex-direction: column; gap: 2px; }
+.brief-check-row { display: flex; align-items: center; gap: 9px; padding: 4px 4px; border-radius: var(--radius-s); }
+.brief-check-row:hover { background: var(--cream-2); }
+.brief-check-text { flex: 1; font-size: 13px; color: var(--ink); }
+.brief-check-row.is-done .brief-check-text { text-decoration: line-through; color: var(--ink-mute); }
+.brief-check-add { display: flex; align-items: center; gap: 9px; padding: 4px; }
+.brief-inline-input {
+  flex: 1; border: none; background: none; font: inherit; font-size: 13px;
+  color: var(--ink); padding: 2px 0; outline: none;
+}
+.brief-inline-input::placeholder { color: var(--ink-mute); }
+
+/* Task rows — Notion-style */
+.brief-tasks { display: flex; flex-direction: column; gap: 2px; }
+.brief-task-row {
+  border-radius: var(--radius-s); padding: 6px 4px;
+  border-left: 3px solid var(--grey); padding-left: 8px; background: transparent;
+}
+.brief-task-row:hover { background: var(--cream-2); }
+.brief-task-row--grey { border-left-color: var(--grey); }
+.brief-task-row--orange { border-left-color: var(--orange); }
+.brief-task-row--green { border-left-color: var(--green); }
+.brief-task-row--red { border-left-color: var(--danger); }
+.brief-task-main { display: flex; align-items: center; gap: 9px; }
+.brief-task-name { flex: 1; font-size: 13px; font-weight: 700; color: var(--ink); }
+.brief-task-name.is-done { text-decoration: line-through; color: var(--ink-mute); font-weight: 600; }
+.brief-task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; padding-left: 27px; }
+
+.brief-meta-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--hairline); background: #fff; color: var(--ink-soft);
+  font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; cursor: pointer;
+}
+.brief-meta-chip:hover { border-color: var(--hairline-strong); }
+.brief-due-input {
+  border: 1px solid var(--orange); border-radius: 999px; font: inherit; font-size: 11px;
+  font-weight: 700; padding: 1px 6px; color: var(--ink); background: #fff; outline: none;
+}
+
+/* Type + status tag selects */
+.brief-type-select, .brief-status-select {
+  border: 1px solid var(--hairline); border-radius: 999px; font: inherit;
+  font-size: 11px; font-weight: 800; padding: 2px 7px; cursor: pointer;
+  color: var(--ink-soft); background: #fff; -webkit-appearance: none; appearance: none;
+}
+.brief-type--navy { background: #e6ecfb; color: var(--navy); border-color: #c9d6f5; }
+.brief-type--orange { background: var(--orange-soft); color: var(--orange); border-color: #ffd2b8; }
+.brief-type--green { background: var(--green-soft); color: var(--green); border-color: #b6e6d2; }
+.brief-type--grey { background: var(--grey-soft); color: var(--ink-soft); border-color: #dfe3ee; }
+.brief-type--red { background: var(--danger-soft); color: var(--danger); border-color: #f3c9c4; }
+
+.brief-src { font-size: 10px; color: var(--ink-mute); font-style: italic; }
+
+.brief-sub-label {
+  font-size: 11px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--ink-mute); margin-bottom: 4px;
+}
+.brief-standup { margin-top: auto; padding-top: 10px; border-top: 1px dashed var(--hairline); }
+.brief-phase-progress {
+  font-size: 12px; font-weight: 800; color: var(--green); background: var(--green-soft);
+  padding: 1px 9px; border-radius: 999px; margin-left: 8px; vertical-align: middle;
+}
+
+/* ── Daily Brief — "warm operations desk" polish ─────────────────────── */
+.brief-screen {
+  position: relative;
+}
+/* Soft warm wash + faint accent glow behind the whole brief. */
+.brief-screen::before {
+  content: '';
+  position: absolute; inset: -24px -24px auto -24px; height: 320px; z-index: 0;
+  background:
+    radial-gradient(620px 280px at 88% -40%, rgba(253,105,37,0.10), transparent 70%),
+    radial-gradient(520px 260px at 6% -30%, rgba(4,31,96,0.06), transparent 70%);
+  pointer-events: none;
+}
+.brief-screen > * { position: relative; z-index: 1; }
+
+/* Staggered page-load reveal */
+@keyframes briefRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.brief-rise { animation: briefRise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) { .brief-rise { animation: none; } }
+
+/* Tabs — sliding accent + tabular feel */
+.brief-tab { transition: color 0.18s ease, border-color 0.18s ease; }
+.brief-tab.on { letter-spacing: 0.005em; }
+
+/* Member identity — monogram avatar + column accent */
+.brief-col {
+  position: relative; border-top: 3px solid var(--hairline);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.brief-col:hover { transform: translateY(-2px); box-shadow: 0 2px 0 rgba(4,31,96,0.04), 0 14px 30px -16px rgba(4,31,96,0.30); }
+.brief-col--fu { border-top-color: var(--orange); }
+.brief-col--tt { border-top-color: var(--navy); }
+.brief-col--fred { border-top-color: var(--green); }
+.brief-col--robert { border-top-color: #0f8a8a; }
+
+.brief-col-head { gap: 9px; }
+.brief-avatar {
+  flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 12px; font-weight: 900; letter-spacing: 0.02em; text-transform: capitalize;
+  box-shadow: inset 0 0 0 1px rgba(4,31,96,0.04);
+}
+.brief-avatar--fu { background: var(--orange-soft); color: var(--orange); }
+.brief-avatar--tt { background: #e6ecfb; color: var(--navy); }
+.brief-avatar--fred { background: var(--green-soft); color: var(--green); }
+.brief-avatar--robert { background: #d6f0f0; color: #0f8a8a; }
+.brief-col-name { flex: 1; }
+.brief-col-count { font-variant-numeric: tabular-nums; }
+
+/* Per-column completion bar */
+.brief-col-bar { height: 4px; border-radius: 999px; background: var(--grey-soft); overflow: hidden; margin: 2px 0 2px; }
+.brief-col-bar > span { display: block; height: 100%; border-radius: 999px; background: var(--green); transition: width 0.4s cubic-bezier(0.22,1,0.36,1); }
+
+/* Checkbox pop on tick */
+@keyframes checkPop { 0% { transform: scale(0.8); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
+.brief-check.on { animation: checkPop 0.22s ease; }
+.brief-check { transition: border-color 0.15s ease, background 0.15s ease; }
+
+/* Row hover nudge */
+.brief-task-row, .brief-check-row { transition: background 0.14s ease, transform 0.14s ease; }
+.brief-task-row:hover { transform: translateX(2px); }
+
+/* Phase plan + allocation — lift on the warm wash */
+.brief-phase, .brief-alloc {
+  box-shadow: 0 1px 0 rgba(4,31,96,0.04), 0 10px 26px -18px rgba(4,31,96,0.26);
+}
+.brief-phase-title { letter-spacing: -0.01em; }
+.brief-period-key { font-variant-numeric: tabular-nums; }
+
+/* Tabular numerics + tighter display headings throughout the brief */
+.brief-day-label { font-variant-numeric: tabular-nums; }
+.brief-screen .page-title { letter-spacing: -0.015em; }
+.brief-screen .eyebrow { letter-spacing: 0.14em; }
+
+/* "Done all" — per-column quick action */
+.brief-doneall {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--green); background: var(--green-soft); color: var(--green);
+  font: inherit; font-size: 11px; font-weight: 800; padding: 2px 9px;
+  border-radius: 999px; cursor: pointer; transition: background 0.15s ease, transform 0.12s ease;
+}
+.brief-doneall:hover { background: var(--green); color: #fff; }
+.brief-doneall:active { transform: scale(0.96); }

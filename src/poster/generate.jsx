@@ -15,12 +15,20 @@ import Poster from '../components/Poster.jsx'
 //   4. jsPDF.output('blob') → return
 //   5. unmount + remove container in finally
 
-function slugify(name) {
-  return String(name || 'property')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'property'
+// Build a human-readable filename like "The Stellar 1400" from the condo name
+// and rent. Strips only filesystem-illegal characters so casing and spaces are
+// preserved.
+function posterFilename(property) {
+  const name = String(property?.condo || 'property')
+    .replace(/[\\/:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+  const rent =
+    typeof property?.rentSGD === 'number' && property.rentSGD > 0
+      ? ` ${Math.round(property.rentSGD)}`
+      : ''
+  return `${name || 'property'}${rent}.pdf`
 }
 
 export async function renderPosterToBlob(property, content, primaryUni = 'NUS') {
@@ -93,7 +101,7 @@ export async function renderPosterToBlob(property, content, primaryUni = 'NUS') 
     }
 
     const blob = pdf.output('blob')
-    const filename = `${slugify(property.condo)}-poster.pdf`
+    const filename = posterFilename(property)
     return { blob, filename }
   } finally {
     try {

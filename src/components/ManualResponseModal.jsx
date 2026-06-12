@@ -52,8 +52,8 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
       onClick={onClose}
     >
       <div
-        className="card"
-        style={{ width: 640, maxHeight: '90vh', overflow: 'auto' }}
+        className="card manual-modal"
+        style={{ width: 'min(640px, calc(100vw - 24px))', maxHeight: '90vh', overflow: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -82,7 +82,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
                 placeholder="Wei Lin Tan / 陳維琳"
               />
             </Field>
-            <Field label="Channel" span={3}>
+            <Field label="Channel" span={3} className="keep-half">
               <select className="select" value={r.channel} onChange={(e) => upd('channel', e.target.value)}>
                 <option>WhatsApp</option>
                 <option>Line</option>
@@ -91,7 +91,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
                 <option>Form</option>
               </select>
             </Field>
-            <Field label="Contact" span={3}>
+            <Field label="Contact" span={3} className="keep-half">
               <input className="input" value={r.contact} onChange={(e) => upd('contact', e.target.value)} placeholder="@handle" />
             </Field>
 
@@ -108,7 +108,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
                 <option>24 months</option>
               </select>
             </Field>
-            <Field label="Commute tolerance" span={3}>
+            <Field label="Commute tolerance" span={3} className="keep-half">
               <div className="input-prefix">
                 <span className="px">min</span>
                 <input
@@ -118,7 +118,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
                 />
               </div>
             </Field>
-            <Field label="Roommates" hint="0 = solo" span={3}>
+            <Field label="Roommates" hint="0 = solo" span={3} className="keep-half">
               <div className="input-prefix">
                 <span className="px">ppl</span>
                 <input
@@ -132,7 +132,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
               </div>
             </Field>
 
-            <Field label="Budget min" span={3}>
+            <Field label="Budget min" span={3} className="keep-half">
               <div className="input-prefix">
                 <span className="px">S$</span>
                 <input
@@ -142,7 +142,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
                 />
               </div>
             </Field>
-            <Field label="Budget max" span={3}>
+            <Field label="Budget max" span={3} className="keep-half">
               <div className="input-prefix">
                 <span className="px">S$</span>
                 <input

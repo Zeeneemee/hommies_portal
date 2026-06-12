@@ -172,8 +172,8 @@ export const Pill = ({ kind, children, dot }) => (
   </span>
 )
 
-export const Field = ({ label, hint, required, span = 6, children }) => (
-  <div className={`field col-${span}`}>
+export const Field = ({ label, hint, required, span = 6, className = '', children }) => (
+  <div className={`field col-${span}${className ? ` ${className}` : ''}`}>
     <label className="field-label">
       {label}
       {required && <span className="req">*</span>}

@@ -182,4 +182,103 @@ export default defineSchema({
     .index('by_property', ['propertyId'])
     .index('by_response', ['responseId'])
     .index('by_stage', ['stage']),
+
+  // --- team-daily-brief ---------------------------------------------------
+  // The four internal teammates. The single identity source for both the
+  // Daily Brief UI columns and Telegram bot authorisation. `telegramUserId`
+  // gates who may write via the bot; `telegramUsername` (without the @) is how
+  // teammates are addressed in cross-assignment / view commands. Seeded once
+  // via team:seed; real Telegram values filled in by team:setTelegram.
+  teamMembers: defineTable({
+    key: v.union(
+      v.literal('fu'),
+      v.literal('tt'),
+      v.literal('fred'),
+      v.literal('robert'),
+    ),
+    name: v.string(),
+    telegramUserId: v.optional(v.number()),
+    telegramUsername: v.optional(v.string()),
+    active: v.boolean(),
+  })
+    .index('by_key', ['key'])
+    .index('by_telegramUserId', ['telegramUserId'])
+    .index('by_username', ['telegramUsername']),
+
+  // One row per to-do item. `day` is a Asia/Singapore 'YYYY-MM-DD' string so
+  // "today" is unambiguous and directly queryable across portal + bot.
+  teamTasks: defineTable({
+    assigneeKey: v.union(
+      v.literal('fu'),
+      v.literal('tt'),
+      v.literal('fred'),
+      v.literal('robert'),
+    ),
+    title: v.string(),
+    status: v.union(
+      v.literal('todo'),
+      v.literal('doing'),
+      v.literal('done'),
+      v.literal('blocked'),
+    ),
+    day: v.string(),
+    // Notion-style list extras. `dueDate` is a 'YYYY-MM-DD' string; `type` is a
+    // free tag (Work / Meeting / Personal / Admin / Follow-up). Both optional.
+    dueDate: v.optional(v.string()),
+    type: v.optional(v.string()),
+    createdByKey: v.optional(v.string()),
+    source: v.union(v.literal('portal'), v.literal('telegram')),
+    createdAt: v.number(),
+    doneAt: v.optional(v.number()),
+  })
+    .index('by_day', ['day'])
+    .index('by_assignee_day', ['assigneeKey', 'day']),
+
+  // DEPRECATED — standups were removed from the Daily Brief (tasks-only now).
+  // Kept so any rows written before removal still validate on push; drop this
+  // table (and its data) once cleared. No code reads or writes it anymore.
+  standups: defineTable({
+    memberKey: v.union(
+      v.literal('fu'),
+      v.literal('tt'),
+      v.literal('fred'),
+      v.literal('robert'),
+    ),
+    day: v.string(),
+    items: v.optional(v.array(v.object({ text: v.string(), done: v.boolean() }))),
+    text: v.optional(v.string()),
+    updatedAt: v.number(),
+    source: v.optional(v.union(v.literal('portal'), v.literal('telegram'))),
+  }).index('by_member_day', ['memberKey', 'day']),
+
+  // The big-picture phase plan — a tick-off checklist per period. One row per
+  // (granularity, periodKey); periodKey is an ISO week ('2026-W24') or a month
+  // ('2026-06'). `items` is the checklist; `content` is kept optional for
+  // back-compat with rows written before the checklist change (migrated on
+  // first read/write, see phasePlan:legacyItems).
+  phasePlans: defineTable({
+    granularity: v.union(v.literal('week'), v.literal('month')),
+    periodKey: v.string(),
+    items: v.optional(v.array(v.object({ text: v.string(), done: v.boolean() }))),
+    content: v.optional(v.string()),
+    updatedByKey: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index('by_period', ['granularity', 'periodKey']),
+
+  // Links an existing customer (responses) to a salesperson to answer/follow
+  // up. Kept separate from `responses` so /sheet/sync upserts never clobber
+  // an allocation. At most one row per (responseId).
+  customerAllocations: defineTable({
+    responseId: v.id('responses'),
+    assigneeKey: v.union(
+      v.literal('fu'),
+      v.literal('tt'),
+      v.literal('fred'),
+      v.literal('robert'),
+    ),
+    allocatedByKey: v.optional(v.string()),
+    allocatedAt: v.number(),
+  })
+    .index('by_response', ['responseId'])
+    .index('by_assignee', ['assigneeKey']),
 })

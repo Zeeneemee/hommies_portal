@@ -6,6 +6,7 @@ import { httpRouter } from 'convex/server'
 import { httpAction } from './_generated/server'
 import { internal } from './_generated/api'
 import { normaliseSheetRows } from './sheetSync'
+import { sendMessage } from './telegram'
 
 const http = httpRouter()
 
@@ -67,6 +68,52 @@ http.route({
       headers: { 'Content-Type': 'application/json' },
     }),
   ),
+})
+
+// Telegram bot webhook. Telegram echoes the secret we set via setWebhook in
+// the `X-Telegram-Bot-Api-Secret-Token` header — validate it before touching
+// anything. The command logic + db writes live in telegram:handleCommand
+// (a mutation, which returns the reply text); we send that reply best-effort.
+// Always return 200 quickly so Telegram doesn't retry.
+http.route({
+  path: '/telegram/webhook',
+  method: 'POST',
+  handler: httpAction(async (ctx, request) => {
+    const expected = process.env.TELEGRAM_WEBHOOK_SECRET
+    const got = request.headers.get('X-Telegram-Bot-Api-Secret-Token')
+    if (!expected || got !== expected) {
+      return new Response('unauthorised', { status: 401 })
+    }
+
+    let update: any
+    try {
+      update = await request.json()
+    } catch {
+      return new Response('ok', { status: 200 })
+    }
+
+    const message = update?.message ?? update?.edited_message
+    const text: string | undefined = message?.text
+    const fromUserId: number | undefined = message?.from?.id
+    const chatId: number | undefined = message?.chat?.id
+
+    // Only act on text messages from a user we can identify a chat to reply to.
+    if (text && typeof fromUserId === 'number' && typeof chatId === 'number') {
+      const reply = await ctx.runMutation(internal.telegram.handleCommand, {
+        fromUserId,
+        text,
+      })
+      if (reply) {
+        try {
+          await sendMessage(chatId, reply)
+        } catch {
+          /* best-effort — never fail the webhook on a send error */
+        }
+      }
+    }
+
+    return new Response('ok', { status: 200 })
+  }),
 })
 
 export default http
