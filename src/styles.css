@@ -3164,3 +3164,42 @@ video.listing-hero-img {
 }
 .brief-doneall:hover { background: var(--green); color: #fff; }
 .brief-doneall:active { transform: scale(0.96); }
+
+/* ── Assigned Clients — user-maps-client ─────────────────────────────── */
+.brief-alloc-col { border-top: 3px solid var(--hairline); }
+.brief-alloc-col--pool { border-top-color: var(--grey); background: #fff; }
+.brief-alloc-col--fu { border-top-color: var(--orange); }
+.brief-alloc-col--tt { border-top-color: var(--navy); }
+.brief-alloc-col--fred { border-top-color: var(--green); }
+.brief-alloc-col--robert { border-top-color: #0f8a8a; }
+.brief-alloc-col .brief-col-head { gap: 9px; align-items: center; }
+
+/* Per-member "+ Add a customer" picker */
+.brief-claim-add {
+  width: 100%; border: 1px dashed var(--hairline-strong); border-radius: var(--radius-s);
+  background: #fff; font: inherit; font-size: 12px; font-weight: 700; color: var(--ink-soft);
+  padding: 6px 8px; cursor: pointer; margin-bottom: 4px;
+}
+.brief-claim-add:hover:not(:disabled) { border-color: var(--orange); color: var(--ink); }
+.brief-claim-add:disabled { opacity: 0.55; cursor: default; }
+
+/* Allocation rows now have actions on the right */
+.brief-alloc-row { flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; }
+.brief-alloc-info { flex: 1; min-width: 0; }
+.brief-alloc-info .brief-alloc-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Quick-claim monogram chips in the unallocated pool */
+.brief-claim-chips { display: flex; gap: 3px; flex: 0 0 auto; }
+.brief-claim-chip {
+  width: 24px; height: 22px; border-radius: 6px; border: 1px solid transparent;
+  font: inherit; font-size: 10px; font-weight: 900; cursor: pointer; text-transform: capitalize;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.brief-claim-chip:hover { transform: translateY(-1px); filter: brightness(0.96); }
+.brief-claim-chip:active { transform: scale(0.94); }
+.brief-claim-chip--fu { background: var(--orange-soft); color: var(--orange); }
+.brief-claim-chip--tt { background: #e6ecfb; color: var(--navy); }
+.brief-claim-chip--fred { background: var(--green-soft); color: var(--green); }
+.brief-claim-chip--robert { background: #d6f0f0; color: #0f8a8a; }
+.brief-alloc-row:hover .brief-row-x { opacity: 1; }

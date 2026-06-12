@@ -472,12 +472,18 @@ function CustomerAllocation({ toast, members }) {
   const allocate = useMutation('customerAllocations:allocate')
   const unallocate = useMutation('customerAllocations:unallocate')
 
-  async function set(responseId, assigneeKey) {
+  async function assign(responseId, assigneeKey) {
     try {
-      if (assigneeKey === '') await unallocate({ responseId })
-      else await allocate({ responseId, assigneeKey })
+      await allocate({ responseId, assigneeKey })
     } catch (err) {
       toast?.(`Could not allocate — ${err?.message || 'try again'}.`)
+    }
+  }
+  async function release(responseId) {
+    try {
+      await unallocate({ responseId })
+    } catch (err) {
+      toast?.(`Could not release — ${err?.message || 'try again'}.`)
     }
   }
 
@@ -490,27 +496,22 @@ function CustomerAllocation({ toast, members }) {
       <div className="brief-phase-head">
         <div>
           <div className="eyebrow">Customer allocation</div>
-          <h2 className="brief-phase-title">Who answers which customer</h2>
+          <h2 className="brief-phase-title">Pick the customers you'll answer</h2>
         </div>
         <span className="muted small">{unallocated.length} unallocated</span>
       </div>
 
       <div className="brief-alloc-grid">
-        <AllocColumn
-          title="Unallocated"
-          rows={unallocated}
-          members={members}
-          onSet={set}
-          emptyText="All customers allocated."
-        />
-        {members.map((m) => (
-          <AllocColumn
+        <UnallocatedPool rows={unallocated} members={members} onAssign={assign} />
+        {members.map((m, i) => (
+          <MemberClients
             key={m.key}
-            title={m.name}
+            member={m}
+            index={i}
             rows={byMember[m.key]}
-            members={members}
-            onSet={set}
-            emptyText="None assigned."
+            pool={unallocated}
+            onAssign={assign}
+            onRelease={release}
           />
         ))}
       </div>
@@ -518,16 +519,18 @@ function CustomerAllocation({ toast, members }) {
   )
 }
 
-function AllocColumn({ title, rows, members, onSet, emptyText }) {
+// The shared pool of customers nobody has claimed yet. Read-only here — you
+// claim from your own column. A quick per-member chip is offered as a shortcut.
+function UnallocatedPool({ rows, members, onAssign }) {
   return (
-    <div className="brief-alloc-col">
+    <div className="brief-alloc-col brief-alloc-col--pool">
       <div className="brief-col-head">
-        <span className="brief-col-name">{title}</span>
+        <span className="brief-col-name">Unallocated</span>
         <span className="brief-col-count">{rows.length}</span>
       </div>
       <div className="brief-alloc-list">
         {rows.length === 0 ? (
-          <div className="brief-empty">{emptyText}</div>
+          <div className="brief-empty">Everyone's claimed. Nice.</div>
         ) : (
           rows.map((r) => (
             <div className="brief-alloc-row" key={r.responseId}>
@@ -538,18 +541,79 @@ function AllocColumn({ title, rows, members, onSet, emptyText }) {
                   {r.channel ? ` · ${r.channel}` : ''}
                 </span>
               </div>
-              <select
-                className="input"
-                value={r.assigneeKey ?? ''}
-                onChange={(e) => onSet(r.responseId, e.target.value)}
-              >
-                <option value="">— Unassigned</option>
+              <div className="brief-claim-chips">
                 {members.map((m) => (
-                  <option key={m.key} value={m.key}>
-                    {m.name}
-                  </option>
+                  <button
+                    key={m.key}
+                    className={`brief-claim-chip brief-claim-chip--${m.key}`}
+                    onClick={() => onAssign(r.responseId, m.key)}
+                    title={`Give to ${m.name}`}
+                  >
+                    {m.name.slice(0, 2)}
+                  </button>
                 ))}
-              </select>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  )
+}
+
+// A teammate's own client list. They add clients to themselves from the
+// unallocated pool (user-maps-client), and release any back to the pool.
+function MemberClients({ member, index = 0, rows, pool, onAssign, onRelease }) {
+  return (
+    <div className={`brief-alloc-col brief-alloc-col--${member.key}`}>
+      <div className="brief-col-head">
+        <span className={`brief-avatar brief-avatar--${member.key}`} aria-hidden="true">
+          {member.name.slice(0, 2)}
+        </span>
+        <span className="brief-col-name">{member.name}</span>
+        <span className="brief-col-count">{rows.length}</span>
+      </div>
+
+      <select
+        className="brief-claim-add"
+        value=""
+        onChange={(e) => {
+          if (e.target.value) onAssign(e.target.value, member.key)
+        }}
+        disabled={pool.length === 0}
+      >
+        <option value="">
+          {pool.length === 0 ? 'No unallocated customers' : `+ Add a customer (${pool.length})…`}
+        </option>
+        {pool.map((r) => (
+          <option key={r.responseId} value={r.responseId}>
+            {r.name}
+            {r.school ? ` · ${r.school}` : ''}
+          </option>
+        ))}
+      </select>
+
+      <div className="brief-alloc-list">
+        {rows.length === 0 ? (
+          <div className="brief-empty">No customers yet — add from above.</div>
+        ) : (
+          rows.map((r) => (
+            <div className="brief-alloc-row" key={r.responseId}>
+              <div className="brief-alloc-info">
+                <span className="brief-alloc-name">{r.name}</span>
+                <span className="muted small">
+                  {r.school}
+                  {r.channel ? ` · ${r.channel}` : ''}
+                </span>
+              </div>
+              <button
+                className="brief-row-x"
+                onClick={() => onRelease(r.responseId)}
+                aria-label="release customer"
+                title="Release back to unallocated"
+              >
+                <Icon name="x" size={12} />
+              </button>
             </div>
           ))
         )}

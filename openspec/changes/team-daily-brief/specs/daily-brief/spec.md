@@ -45,16 +45,16 @@ The system SHALL allow a user to change a task's status, and the change SHALL be
 - **THEN** the task is visually distinguished as blocked in the assignee's section
 
 ### Requirement: Customer allocation per salesperson
-The system SHALL provide a customer-allocation section that assigns incoming customers (existing `responses` records) to a teammate to answer/follow up, reusing existing customer data rather than duplicating it. The brief SHALL show which customers each teammate currently owns.
+The system SHALL provide a customer-allocation section that assigns incoming customers (existing `responses` records) to a teammate to answer/follow up, reusing existing customer data rather than duplicating it. The brief SHALL show which customers each teammate currently owns. Allocation SHALL be user-driven: a teammate claims customers into their own list from a shared unallocated pool (rather than each customer carrying a who-owns-this picker), and SHALL be able to release a customer back to the pool.
 
-#### Scenario: Allocate a customer
-- **WHEN** a user allocates a customer to Robert
-- **THEN** that customer appears in Robert's customer-allocation list on the brief
+#### Scenario: Claim a customer into your list
+- **WHEN** Robert adds an unallocated customer to his own list
+- **THEN** that customer appears in Robert's customer-allocation list and leaves the unallocated pool
 
 #### Scenario: View unassigned customers
 - **WHEN** there are customers (`responses`) with no allocated salesperson
-- **THEN** the system surfaces them as unallocated so a user can assign one
+- **THEN** the system surfaces them in a shared unallocated pool any teammate can claim from
 
-#### Scenario: Reassign a customer
-- **WHEN** an allocated customer is reassigned from Robert to Fu
-- **THEN** the customer moves out of Robert's list and into Fu's list
+#### Scenario: Release a customer back to the pool
+- **WHEN** Robert releases a customer from his list
+- **THEN** the customer returns to the unallocated pool, available for any teammate to claim
