@@ -1,6 +1,7 @@
 import React from 'react'
 import { useMutation } from 'convex/react'
 import { Icon, Field, Segment } from './ui.jsx'
+import { deriveBedroomTag, mergeBedroomTag } from '../../convex/lib/bedroomTags'
 
 const VIDEO_MAX_BYTES = 200 * 1024 * 1024
 const VIDEO_MIME_TYPES = ['video/mp4', 'video/quicktime', 'video/webm']
@@ -136,6 +137,13 @@ export default function ListingEditModal({ property, onClose, onSave, toast }) {
     if (nus != null && ntu != null && smu != null) {
       patch.commuteMins = { NUS: nus, NTU: ntu, SMU: smu }
     }
+    // Keep the bedroom tag in sync with the edited count — recompute via the
+    // shared helper so it matches extraction's vocabulary, preserving any
+    // non-bedroom tags. (unitType isn't editable here; fall back to the row's.)
+    patch.tags = mergeBedroomTag(
+      property.tags,
+      deriveBedroomTag({ bedrooms: patch.bedrooms, unitType: property.unitType }),
+    )
     setBusy(true)
     try {
       // Run video change first so a failure surfaces before the descriptive

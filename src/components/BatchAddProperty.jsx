@@ -15,7 +15,7 @@ const MAX_ROWS = 30
 const SAVE_FIELDS = [
   'rentSGD', 'area', 'buildingType', 'housingType',
   'ageYears', 'unitType', 'fullAddress', 'commuteMins',
-  'masterCount', 'commonCount',
+  'masterCount', 'commonCount', 'bedrooms', 'bathrooms', 'tags',
 ]
 
 const STATUS_LABEL = {

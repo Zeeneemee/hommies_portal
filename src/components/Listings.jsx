@@ -3,6 +3,10 @@ import { useMutation, useQuery } from 'convex/react'
 import { useNavigate } from 'react-router-dom'
 import { Pill, StatusPill, Icon } from './ui.jsx'
 import ListingEditModal from './ListingEditModal.jsx'
+import { BEDROOM_TAG_RE } from '../../convex/lib/bedroomTags'
+
+// Stable display order for bedroom tags in the filter dropdown.
+const BEDROOM_TAG_ORDER = (t) => (t === 'Studio' ? 0 : Number(t.replace('BR', '')) || 99)
 
 // A property is "orphan" when it has been around long enough to plausibly
 // have been pinned/sent yet has zero active assignments. Clock starts at
@@ -35,6 +39,7 @@ export default function ListingsScreen({ properties, toast }) {
   const [rentMax, setRentMax] = React.useState('')
   const [beds, setBeds] = React.useState('Any')
   const [baths, setBaths] = React.useState('Any')
+  const [bedTag, setBedTag] = React.useState('Any')
   const [housing, setHousing] = React.useState('All')
   const [statusFilter, setStatusFilter] = React.useState('All')
   const [editingId, setEditingId] = React.useState(null)
@@ -87,8 +92,21 @@ export default function ListingsScreen({ properties, toast }) {
   }
   const matchesBeds = (p) => matchesCount(p.bedrooms, beds)
   const matchesBaths = (p) => matchesCount(p.bathrooms, baths)
+  // Bedroom tag filter — distinguishes Studio from 1BR in a way the numeric
+  // beds filter can't, and works on backfilled rows via their `tags` array.
+  const matchesBedTag = (p) =>
+    bedTag === 'Any' || (Array.isArray(p.tags) && p.tags.includes(bedTag))
   const matchesHousing = (p) => housing === 'All' || p.housingType === housing
   const matchesStatus = (p) => statusFilter === 'All' || p.status === statusFilter
+
+  // Bedroom tags actually present in the inventory, in display order.
+  const bedTagOptions = React.useMemo(() => {
+    const set = new Set()
+    for (const p of properties) {
+      for (const t of p.tags || []) if (BEDROOM_TAG_RE.test(t)) set.add(t)
+    }
+    return Array.from(set).sort((a, b) => BEDROOM_TAG_ORDER(a) - BEDROOM_TAG_ORDER(b))
+  }, [properties])
 
   const filtered = properties.filter(
     (p) =>
@@ -97,6 +115,7 @@ export default function ListingsScreen({ properties, toast }) {
       matchesRent(p) &&
       matchesBeds(p) &&
       matchesBaths(p) &&
+      matchesBedTag(p) &&
       matchesHousing(p) &&
       matchesStatus(p),
   )
@@ -113,6 +132,7 @@ export default function ListingsScreen({ properties, toast }) {
     rentMax !== '' ||
     beds !== 'Any' ||
     baths !== 'Any' ||
+    bedTag !== 'Any' ||
     housing !== 'All' ||
     statusFilter !== 'All'
   const filtersActive = debouncedSearch !== '' || advancedActive || filter !== 'All'
@@ -128,6 +148,7 @@ export default function ListingsScreen({ properties, toast }) {
     setRentMax('')
     setBeds('Any')
     setBaths('Any')
+    setBedTag('Any')
     setHousing('All')
     setStatusFilter('All')
   }
@@ -240,6 +261,19 @@ export default function ListingsScreen({ properties, toast }) {
               <option value="4">4 beds</option>
               <option value="5+">5+ beds</option>
             </select>
+            {bedTagOptions.length > 0 && (
+              <select
+                className="select select-sm"
+                value={bedTag}
+                onChange={(e) => setBedTag(e.target.value)}
+                aria-label="Bedroom tag"
+              >
+                <option value="Any">Tag: Any</option>
+                {bedTagOptions.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+            )}
             <select
               className="select select-sm"
               value={baths}

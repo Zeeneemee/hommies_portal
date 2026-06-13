@@ -3,10 +3,11 @@
 // whatever fields it could lift. Tolerant: missing values just stay absent.
 'use node'
 
-import { action } from './_generated/server'
-import { internal } from './_generated/api'
+import { action, internalAction } from './_generated/server'
+import { api, internal } from './_generated/api'
 import { v } from 'convex/values'
 import { parsePosterText } from './posterExtraction'
+import { deriveBedroomTag, mergeBedroomTag } from './lib/bedroomTags'
 import { GoogleGenAI } from '@google/genai'
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
@@ -497,6 +498,13 @@ Strip "S$", "$", commas from numeric values. If the listing says "Studio" use un
       parsed = first
     }
     const fields = sanitiseGeminiFields(parsed)
+    // Derive the bedroom tag from the sanitised count so the client persists it
+    // on save (no prior server-side tags exist on this not-yet-saved listing).
+    const bedroomTag = deriveBedroomTag({
+      bedrooms: fields.bedrooms as number | undefined,
+      unitType: fields.unitType as string | undefined,
+    })
+    if (bedroomTag) fields.tags = mergeBedroomTag(undefined, bedroomTag)
     const suggestedCondo =
       typeof parsed?.condo === 'string' && parsed.condo.trim() ? parsed.condo.trim() : undefined
     const note = `raw=${text.slice(0, 500)} | keys=${Object.keys(fields).join(',') || '(none)'}`
@@ -648,6 +656,38 @@ export const fetchImagesAsData = action({
   },
 })
 
+// One-shot backfill — re-extracts every poster-bearing property so existing
+// prod rows recover their bedroom count and get the derived bedroom tag. Run
+// once from the Convex dashboard / CLI; not scheduled. Each row is re-extracted
+// in its own try/catch so one bad PDF can't abort the batch. Rows with no
+// poster, or whose poster yields no bedroom count, are left untagged (the
+// operator can set the count in the edit modal). Returns a tally.
+export const backfillBedroomTags = internalAction({
+  args: {},
+  handler: async (ctx): Promise<{ total: number; tagged: number; skipped: number; failed: number }> => {
+    const rows = await ctx.runQuery(internal.properties.listForBackfill, {})
+    let tagged = 0
+    let skipped = 0
+    let failed = 0
+    for (const row of rows) {
+      if (!row.hasPoster) {
+        skipped++
+        continue
+      }
+      try {
+        const res = await ctx.runAction(api.extraction.extractPosterDetails, { id: row._id })
+        if (res?.bedroomTag) tagged++
+        else skipped++
+      } catch (err) {
+        console.warn(`[backfillBedroomTags] ${row._id} failed:`, err)
+        failed++
+      }
+    }
+    console.log(`[backfillBedroomTags] total=${rows.length} tagged=${tagged} skipped=${skipped} failed=${failed}`)
+    return { total: rows.length, tagged, skipped, failed }
+  },
+})
+
 export const extractPosterDetails = action({
   args: { id: v.id('properties') },
   handler: async (ctx, { id }) => {
@@ -683,11 +723,21 @@ export const extractPosterDetails = action({
       patch[k] = v
     }
 
+    // Bedroom tag: derive from the freshly-lifted count and merge into the
+    // property's existing tags, replacing any prior bedroom tag (idempotent on
+    // re-extraction) while preserving non-bedroom tags.
+    const bedroomTag = deriveBedroomTag({
+      bedrooms: fields.bedrooms as number | undefined,
+      unitType: (fields.unitType ?? property.unitType) as string | undefined,
+    })
+    if (bedroomTag) patch.tags = mergeBedroomTag(property.tags, bedroomTag)
+
     await ctx.runMutation(internal.properties.update, { id, patch: patch as any })
 
     return {
       ok: patch.posterExtractionOk,
       liftedFields: Object.keys(fields),
+      bedroomTag: bedroomTag ?? null,
       rawLen: raw.length,
       usedGemini,
     }

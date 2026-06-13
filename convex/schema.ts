@@ -39,6 +39,11 @@ export default defineSchema({
     commonCount: v.optional(v.number()),
     bedrooms: v.optional(v.number()),
     bathrooms: v.optional(v.number()),
+    // Normalized, filterable label set. The first tag kind is a bedroom tag
+    // ("Studio" / "<n>BR") derived from the bedroom count by
+    // lib/bedroomTags:deriveBedroomTag; the array is designed to hold other
+    // kinds later (furnishing, area, housing type).
+    tags: v.optional(v.array(v.string())),
     fullAddress: v.optional(v.string()),
     commuteMins: v.optional(
       v.object({

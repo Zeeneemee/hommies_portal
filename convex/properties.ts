@@ -2,7 +2,7 @@
 // All persistence flows through this file — no UI component touches storage
 // directly.
 
-import { mutation, query } from './_generated/server'
+import { internalQuery, mutation, query } from './_generated/server'
 import { v } from 'convex/values'
 
 const imageSchema = v.object({
@@ -28,6 +28,7 @@ const propertyAddArgs = {
   commonCount: v.optional(v.number()),
   bedrooms: v.optional(v.number()),
   bathrooms: v.optional(v.number()),
+  tags: v.optional(v.array(v.string())),
   fullAddress: v.optional(v.string()),
   commuteMins: v.optional(
     v.object({ NUS: v.number(), NTU: v.number(), SMU: v.number() }),
@@ -64,6 +65,17 @@ export const list = query({
         videoUrl: p.videoStorageId ? await ctx.storage.getUrl(p.videoStorageId) : null,
       })),
     )
+  },
+})
+
+// Lightweight listing for the one-shot bedroom-tag backfill — just the id and
+// whether a poster is attached, so the backfill action can re-extract each row
+// without resolving every storage URL `list` would.
+export const listForBackfill = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query('properties').collect()
+    return rows.map((p) => ({ _id: p._id, hasPoster: !!p.posterStorageId }))
   },
 })
 
@@ -155,6 +167,7 @@ export const update = mutation({
       commonCount: v.optional(v.number()),
       bedrooms: v.optional(v.number()),
       bathrooms: v.optional(v.number()),
+      tags: v.optional(v.array(v.string())),
       fullAddress: v.optional(v.string()),
       commuteMins: v.optional(
         v.object({ NUS: v.number(), NTU: v.number(), SMU: v.number() }),

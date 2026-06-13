@@ -460,13 +460,13 @@ function AddPropertySingle({ toast, onSaved, draft }) {
       }
 
       // 4. Create the property record. Only the schema-accepted extracted
-      // fields are spread; the URL extractor lifts more (sizeSqft, furnishing,
-      // availability, etc.) but properties:add doesn't accept those yet —
-      // they're poster-only for now.
+      // fields are spread (incl. the derived bedroom `tags`); the URL extractor
+      // lifts more (sizeSqft, furnishing, availability, etc.) but properties:add
+      // doesn't accept those yet — they're poster-only for now.
       const SAVE_FIELDS = [
         'rentSGD', 'area', 'buildingType', 'housingType',
         'ageYears', 'unitType', 'fullAddress', 'commuteMins',
-        'masterCount', 'commonCount',
+        'masterCount', 'commonCount', 'bedrooms', 'bathrooms', 'tags',
       ]
       const savable = {}
       for (const k of SAVE_FIELDS) if (extracted?.[k] !== undefined) savable[k] = extracted[k]
