@@ -1,9 +1,10 @@
 import React from 'react'
-import { useMutation, useAction } from 'convex/react'
+import { useMutation, useAction, useQuery } from 'convex/react'
 import { Link } from 'react-router-dom'
 import { Icon, Field } from './ui.jsx'
 import { renderPosterToBlob } from '../poster/generate.jsx'
 import { resizeImageToJpeg, blobToBase64 } from '../poster/encode.js'
+import { normalizeListingUrl } from '../listingUrl.js'
 
 // Batch Add Property — paste many PropertyGuru URLs, get a row per link with
 // streamed extraction, edit inline, then generate & save posters one at a
@@ -110,6 +111,13 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
 
   const addProperty = useMutation('properties:add')
   const generateUploadUrl = useMutation('properties:generateUploadUrl')
+  // Source URLs of every already-saved property — pasted links that match one
+  // are blocked and never scraped. Normalized into a Set for O(1) lookup.
+  const savedListingUrls = useQuery('properties:listingUrls') ?? []
+  const savedUrlKeys = React.useMemo(
+    () => new Set(savedListingUrls.map(normalizeListingUrl).filter(Boolean)),
+    [savedListingUrls],
+  )
   const extractPropertyGuruUrl = useAction('extraction:extractPropertyGuruUrl')
   const fetchImagesAsData = useAction('extraction:fetchImagesAsData')
   const generatePosterContent = useAction('ai:generatePosterContent')
@@ -210,15 +218,22 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
       toast('Paste at least one URL.')
       return
     }
-    const existing = new Set(rows.map((r) => r.url))
+    // Dedup keys are normalized so trivial URL variants (trailing slash, query
+    // params, www, http/https) of the same listing collapse together.
+    const existing = new Set(rows.map((r) => normalizeListingUrl(r.url)))
     const seen = new Set()
     const valid = []
     let invalid = 0
-    let dup = 0
+    let dupBatch = 0
+    let dupSaved = 0
     for (const t of tokens) {
       if (!isValidUrl(t)) { invalid++; continue }
-      if (seen.has(t) || existing.has(t)) { dup++; continue }
-      seen.add(t)
+      const key = normalizeListingUrl(t)
+      // Already scraped & saved before — block and skip the scrape entirely.
+      if (savedUrlKeys.has(key)) { dupSaved++; continue }
+      // Already pasted earlier in this batch (a row, or this same paste).
+      if (seen.has(key) || existing.has(key)) { dupBatch++; continue }
+      seen.add(key)
       valid.push(t)
     }
     const room = MAX_ROWS - rows.length
@@ -228,7 +243,8 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
     setUrlInput('')
     const bits = []
     if (accepted.length) bits.push(`Added ${accepted.length}`)
-    if (dup) bits.push(`${dup} duplicate${dup === 1 ? '' : 's'} skipped`)
+    if (dupSaved) bits.push(`${dupSaved} already in portal — skipped`)
+    if (dupBatch) bits.push(`${dupBatch} duplicate${dupBatch === 1 ? '' : 's'} skipped`)
     if (invalid) bits.push(`${invalid} invalid skipped`)
     if (trimmed) bits.push(`${trimmed} trimmed (cap ${MAX_ROWS})`)
     toast(bits.join(' · ') || 'Nothing added.')
@@ -410,6 +426,7 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
         posterStorageId,
         posterName,
         posterSize,
+        listingUrl: row.url || undefined,
         ...savable,
       })
       if (posterStorageId) {

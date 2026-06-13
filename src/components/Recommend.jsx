@@ -17,6 +17,7 @@ import {
 } from '../assignmentHelpers.js'
 import { Icon, Pill, StatusPill } from './ui.jsx'
 import ManualResponseModal from './ManualResponseModal.jsx'
+import ListingPreviewModal from './ListingPreviewModal.jsx'
 
 // Screen 3 — the decision engine, layered with the operator's commitment
 // ledger. Each view shows four stacked sections:
@@ -100,6 +101,9 @@ export default function RecommendScreen({ toast, properties, responses }) {
 
   const [viewMode, setViewMode] = React.useState('by-property')
   const [showManual, setShowManual] = React.useState(false)
+  // Read-only listing preview surfaced from either view. Holds the full
+  // property object so the modal renders without another lookup.
+  const [previewProperty, setPreviewProperty] = React.useState(null)
   const csvRef = React.useRef(null)
 
   // Listings cards link here with ?property=<id>. We honour it the first
@@ -112,6 +116,9 @@ export default function RecommendScreen({ toast, properties, responses }) {
     return params.get('property')
   }, [location.search])
   const [initialPropertyId, setInitialPropertyId] = React.useState(requestedPropertyId)
+  // Which customer the by-client view should focus on. Set when the operator
+  // jumps from a pinned customer card in the by-property view.
+  const [focusClientId, setFocusClientId] = React.useState(null)
   React.useEffect(() => {
     if (requestedPropertyId) {
       setViewMode('by-property')
@@ -119,6 +126,17 @@ export default function RecommendScreen({ toast, properties, responses }) {
       navigate('/recommend', { replace: true })
     }
   }, [requestedPropertyId, navigate])
+
+  // Cross-view navigation from a pinned card. The pinned counterpart always
+  // lands in the destination's "Must send" section — i.e. ranked at the top.
+  const jumpToClient = React.useCallback((clientId) => {
+    setFocusClientId(clientId)
+    setViewMode('by-client')
+  }, [])
+  const jumpToProperty = React.useCallback((propertyId) => {
+    setInitialPropertyId(propertyId)
+    setViewMode('by-property')
+  }, [])
 
   async function handleCSV(file) {
     if (!file) return
@@ -200,6 +218,8 @@ export default function RecommendScreen({ toast, properties, responses }) {
           actions={actions}
           toast={toast}
           initialPropertyId={initialPropertyId}
+          onPreview={setPreviewProperty}
+          onJumpToClient={jumpToClient}
         />
       ) : (
         <ByClientView
@@ -208,6 +228,9 @@ export default function RecommendScreen({ toast, properties, responses }) {
           assignments={assignments}
           actions={actions}
           toast={toast}
+          onPreview={setPreviewProperty}
+          focusClientId={focusClientId}
+          onJumpToProperty={jumpToProperty}
         />
       )}
 
@@ -220,6 +243,10 @@ export default function RecommendScreen({ toast, properties, responses }) {
             setShowManual(false)
           }}
         />
+      )}
+
+      {previewProperty && (
+        <ListingPreviewModal property={previewProperty} onClose={() => setPreviewProperty(null)} />
       )}
     </div>
   )
@@ -267,7 +294,7 @@ function Header({ viewMode, onViewMode, hideToggle, actions }) {
 // ─────────────────────────────────────────────────────────────────────────────
 // VIEW 1 — By property
 // ─────────────────────────────────────────────────────────────────────────────
-function ByPropertyView({ properties, responses, assignments, actions, toast, initialPropertyId }) {
+function ByPropertyView({ properties, responses, assignments, actions, toast, initialPropertyId, onPreview, onJumpToClient }) {
   const matchable = React.useMemo(() => properties.filter(propertyIsMatchable), [properties])
   const hiddenCount = properties.length - matchable.length
 
@@ -489,8 +516,16 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
 
         {prop && (
           <div className="card" style={{ marginBottom: 18 }}>
-            <div className="card-pad recommend-fact-row">
+            <div className="card-pad recommend-fact-row" style={{ position: 'relative' }}>
               <Fact label="Matching against" value={prop.condo} big />
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ position: 'absolute', top: 12, right: 16 }}
+                onClick={() => onPreview(prop)}
+              >
+                <Icon name="photo" size={12} /> View listing
+              </button>
               <Fact label="Rent" value={`S$${prop.rentSGD}/mo`} />
               <Fact
                 label="Commute"
@@ -569,6 +604,7 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
                 actions={actions}
                 toast={toast}
                 rank={idx + 1}
+                onJump={onJumpToClient ? () => onJumpToClient(d.response._id) : undefined}
               />
             ))
           )}
@@ -652,11 +688,21 @@ function ByPropertyView({ properties, responses, assignments, actions, toast, in
 // ─────────────────────────────────────────────────────────────────────────────
 const SCHOOL_FILTERS = ['All', 'NUS', 'NTU', 'SMU', 'OTHER']
 
-function ByClientView({ properties, responses, assignments, actions, toast }) {
+function ByClientView({ properties, responses, assignments, actions, toast, onPreview, focusClientId, onJumpToProperty }) {
   const [school, setSchool] = React.useState('All')
   const [search, setSearch] = React.useState('')
-  const [selectedId, setSelectedId] = React.useState(responses[0]?._id || null)
+  const [selectedId, setSelectedId] = React.useState(focusClientId || responses[0]?._id || null)
   const [expanded, setExpanded] = React.useState({})
+
+  // Honour a cross-view jump: when the operator clicks a pinned customer in
+  // the by-property view, focus that customer (and clear any school filter
+  // hiding them) so their pinned listing shows up top in Must-send.
+  React.useEffect(() => {
+    if (focusClientId && responses.find((r) => r._id === focusClientId)) {
+      setSelectedId(focusClientId)
+      setSchool('All')
+    }
+  }, [focusClientId, responses])
 
   const filtered = React.useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -820,6 +866,8 @@ function ByClientView({ properties, responses, assignments, actions, toast }) {
                 onToggle={() => setExpanded((e) => ({ ...e, [d.assignment._id]: !e[d.assignment._id] }))}
                 actions={actions}
                 toast={toast}
+                onPreview={onPreview}
+                onJump={onJumpToProperty ? () => onJumpToProperty(d.property._id) : undefined}
               />
             ))
           )}
@@ -841,6 +889,7 @@ function ByClientView({ properties, responses, assignments, actions, toast }) {
                 onToggle={() => setExpanded((e) => ({ ...e, [d.assignment._id]: !e[d.assignment._id] }))}
                 actions={actions}
                 toast={toast}
+                onPreview={onPreview}
               />
             ))
           )}
@@ -862,6 +911,7 @@ function ByClientView({ properties, responses, assignments, actions, toast }) {
                 onToggle={() => setExpanded((e) => ({ ...e, [d.property._id]: !e[d.property._id] }))}
                 actions={actions}
                 toast={toast}
+                onPreview={onPreview}
               />
             ))
           )}
@@ -882,6 +932,7 @@ function ByClientView({ properties, responses, assignments, actions, toast }) {
                 onToggle={() => {}}
                 actions={actions}
                 toast={toast}
+                onPreview={onPreview}
               />
             ))
           )}
@@ -1189,7 +1240,7 @@ function relativeTime(ms) {
 //   hold       — decide() Hold-bucket row, [Override and pin] gated by confirm
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ClientMatchCard({ variant, rank, response, decision, property, assignment, isOpen, onToggle, actions, toast }) {
+function ClientMatchCard({ variant, rank, response, decision, property, assignment, isOpen, onToggle, actions, toast, onJump }) {
   const isSuggestion = variant === 'suggestion'
   const isMustSend = variant === 'must-send'
   const isSent = variant === 'sent'
@@ -1343,6 +1394,15 @@ function ClientMatchCard({ variant, rank, response, decision, property, assignme
             <button className="btn btn-ghost btn-sm" onClick={onToggle}>
               <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
             </button>
+            {onJump && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={onJump}
+                title="See this customer's matches — this pinned listing ranks top"
+              >
+                <Icon name="user" size={12} /> View customer <Icon name="arrow-right" size={12} />
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={onUnpin}>
               Unpin
             </button>
@@ -1370,7 +1430,7 @@ function ClientMatchCard({ variant, rank, response, decision, property, assignme
   )
 }
 
-function PropertyMatchCard({ variant, rank, property, decision, client, assignment, isOpen, onToggle, actions, toast }) {
+function PropertyMatchCard({ variant, rank, property, decision, client, assignment, isOpen, onToggle, actions, toast, onPreview, onJump }) {
   const isSuggestion = variant === 'suggestion'
   const isMustSend = variant === 'must-send'
   const isSent = variant === 'sent'
@@ -1444,7 +1504,18 @@ function PropertyMatchCard({ variant, rank, property, decision, client, assignme
       </div>
       <div className="match-body">
         <div className="top">
-          <span className="name">{property.condo}</span>
+          {onPreview ? (
+            <button
+              type="button"
+              className="match-name-link"
+              onClick={() => onPreview(property)}
+              title="View listing"
+            >
+              {property.condo}
+            </button>
+          ) : (
+            <span className="name">{property.condo}</span>
+          )}
           <span className="meta">
             {property.area ? ` · ${property.area}` : ''}
             {property.unitType ? ` · ${property.unitType}` : ''}
@@ -1548,6 +1619,15 @@ function PropertyMatchCard({ variant, rank, property, decision, client, assignme
             <button className="btn btn-ghost btn-sm" onClick={onToggle}>
               <Icon name="mail" size={12} /> {isOpen ? 'Hide' : 'Draft'}
             </button>
+            {onJump && (
+              <button
+                className="btn btn-ghost btn-sm"
+                onClick={onJump}
+                title="See this property's matches — this pinned customer ranks top"
+              >
+                <Icon name="grid" size={12} /> View property <Icon name="arrow-right" size={12} />
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={onUnpin}>
               Unpin
             </button>

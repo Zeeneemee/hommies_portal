@@ -480,6 +480,7 @@ function AddPropertySingle({ toast, onSaved, draft }) {
         videoName,
         videoSize,
         videoContentType,
+        listingUrl: pgUrl?.trim() || undefined,
         ...savable,
       })
 

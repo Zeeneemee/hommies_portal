@@ -680,6 +680,13 @@ input, select, textarea { font-family: inherit; font-size: 14px; color: var(--in
   margin-bottom: 4px;
 }
 .match-body .name { font-weight: 600; color: var(--navy); font-size: 15px; }
+.match-body .match-name-link {
+  font-weight: 600; color: var(--navy); font-size: 15px;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  text-align: left; text-decoration: underline; text-decoration-color: transparent;
+  text-underline-offset: 3px; transition: text-decoration-color .12s ease;
+}
+.match-body .match-name-link:hover { text-decoration-color: var(--navy); }
 .match-body .meta { color: var(--ink-soft); font-size: 12.5px; }
 .match-body .reason { font-size: 13px; color: var(--ink); margin-top: 6px; }
 .match-criteria {
@@ -2482,6 +2489,23 @@ video.listing-hero-img {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.prop-mark-card-condo--link {
+  display: block;
+  max-width: 100%;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 0.12s ease, color 0.12s ease;
+}
+.prop-mark-card-condo--link:hover {
+  color: var(--navy);
+  text-decoration-color: currentColor;
+}
 .prop-mark-card-sub {
   font-size: 12px;
   color: var(--ink-mute);
@@ -3203,3 +3227,12 @@ video.listing-hero-img {
 .brief-claim-chip--fred { background: var(--green-soft); color: var(--green); }
 .brief-claim-chip--robert { background: #d6f0f0; color: #0f8a8a; }
 .brief-alloc-row:hover .brief-row-x { opacity: 1; }
+
+/* "Clear done" — remove completed tasks */
+.brief-cleardone {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 4px;
+  border: none; background: none; color: var(--ink-mute); font: inherit;
+  font-size: 11px; font-weight: 700; padding: 1px 2px; cursor: pointer; border-radius: 4px;
+  transition: color 0.14s ease;
+}
+.brief-cleardone:hover { color: var(--danger); }

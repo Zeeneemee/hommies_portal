@@ -656,24 +656,41 @@ export const fetchImagesAsData = action({
   },
 })
 
-// One-shot backfill — re-extracts every poster-bearing property so existing
-// prod rows recover their bedroom count and get the derived bedroom tag. Run
-// once from the Convex dashboard / CLI; not scheduled. Each row is re-extracted
-// in its own try/catch so one bad PDF can't abort the batch. Rows with no
-// poster, or whose poster yields no bedroom count, are left untagged (the
-// operator can set the count in the edit modal). Returns a tally.
+// One-shot backfill — re-extracts poster-bearing properties so existing prod
+// rows recover their bedroom count and get the derived bedroom tag. Processes a
+// bounded `batchSize` of rows per invocation (each poster is a Gemini call, and
+// a single Convex action can't run long enough to do all of them) then
+// self-schedules the next batch via `offset` until the inventory is exhausted.
+// Kick it off with `convex run extraction:backfillBedroomTags`; the chain
+// finishes in the background. Each row is re-extracted in its own try/catch so
+// one bad PDF can't abort the batch, and extractPosterDetails commits per-row,
+// so progress survives even if a batch dies. Rows whose poster yields no
+// bedroom count are left untagged (the operator can set the count in the edit
+// modal). Returns this batch's tally plus how many rows remain.
 export const backfillBedroomTags = internalAction({
-  args: {},
-  handler: async (ctx): Promise<{ total: number; tagged: number; skipped: number; failed: number }> => {
-    const rows = await ctx.runQuery(internal.properties.listForBackfill, {})
+  args: { offset: v.optional(v.number()), batchSize: v.optional(v.number()) },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    totalPosterRows: number
+    offset: number
+    processed: number
+    tagged: number
+    skipped: number
+    failed: number
+    remaining: number
+  }> => {
+    const offset = args.offset ?? 0
+    const batchSize = args.batchSize ?? 15
+    const posterRows = (await ctx.runQuery(internal.properties.listForBackfill, {})).filter(
+      (r) => r.hasPoster,
+    )
+    const batch = posterRows.slice(offset, offset + batchSize)
     let tagged = 0
     let skipped = 0
     let failed = 0
-    for (const row of rows) {
-      if (!row.hasPoster) {
-        skipped++
-        continue
-      }
+    for (const row of batch) {
       try {
         const res = await ctx.runAction(api.extraction.extractPosterDetails, { id: row._id })
         if (res?.bedroomTag) tagged++
@@ -683,8 +700,23 @@ export const backfillBedroomTags = internalAction({
         failed++
       }
     }
-    console.log(`[backfillBedroomTags] total=${rows.length} tagged=${tagged} skipped=${skipped} failed=${failed}`)
-    return { total: rows.length, tagged, skipped, failed }
+    const nextOffset = offset + batch.length
+    const remaining = Math.max(0, posterRows.length - nextOffset)
+    // Driven batch-by-batch from the CLI (no in-Convex self-scheduling) so a
+    // transient platform error fails one batch instead of silently breaking a
+    // chain. The caller advances `offset` until `remaining` is 0.
+    console.log(
+      `[backfillBedroomTags] offset=${offset} processed=${batch.length} tagged=${tagged} skipped=${skipped} failed=${failed} remaining=${remaining}`,
+    )
+    return {
+      totalPosterRows: posterRows.length,
+      offset,
+      processed: batch.length,
+      tagged,
+      skipped,
+      failed,
+      remaining,
+    }
   },
 })
 

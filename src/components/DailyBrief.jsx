@@ -89,6 +89,7 @@ export default function DailyBrief({ toast }) {
   const updateTask = useMutation('dailyBrief:updateTask')
   const removeTask = useMutation('dailyBrief:removeTask')
   const markAllDone = useMutation('dailyBrief:markAllDone')
+  const clearDone = useMutation('dailyBrief:clearDone')
 
   async function run(fn, ok) {
     try {
@@ -175,6 +176,7 @@ export default function DailyBrief({ toast }) {
                 onUpdate={(taskId, patch) => run(() => updateTask({ taskId, ...patch }))}
                 onRemove={(taskId) => run(() => removeTask({ taskId }))}
                 onDoneAll={() => run(() => markAllDone({ assigneeKey: m.key, day }))}
+                onClearDone={() => run(() => clearDone({ assigneeKey: m.key, day }))}
               />
             ))}
           </div>
@@ -241,7 +243,17 @@ function Checklist({ items, onAdd, onToggle, onRemove, placeholder }) {
   )
 }
 
-function MemberColumn({ member, index = 0, tasks, onAdd, onStatus, onUpdate, onRemove, onDoneAll }) {
+function MemberColumn({
+  member,
+  index = 0,
+  tasks,
+  onAdd,
+  onStatus,
+  onUpdate,
+  onRemove,
+  onDoneAll,
+  onClearDone,
+}) {
   const [draft, setDraft] = React.useState('')
   const submit = () => {
     const t = draft.trim()
@@ -279,6 +291,11 @@ function MemberColumn({ member, index = 0, tasks, onAdd, onStatus, onUpdate, onR
         <div className="brief-col-bar" aria-hidden="true">
           <span style={{ width: `${(doneCount / total) * 100}%` }} />
         </div>
+      )}
+      {doneCount > 0 && (
+        <button className="brief-cleardone" onClick={onClearDone}>
+          <Icon name="trash" size={11} /> Clear {doneCount} done
+        </button>
       )}
 
       <div className="brief-tasks">

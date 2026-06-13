@@ -95,6 +95,26 @@ export const markAllDone = mutation({
   },
 })
 
+// Delete every done task for a teammate on a day. Returns the number removed.
+export const clearDone = mutation({
+  args: { assigneeKey: MEMBER_KEY, day: v.optional(v.string()) },
+  handler: async (ctx, { assigneeKey, day }) => {
+    const d = day ?? today()
+    const rows = await ctx.db
+      .query('teamTasks')
+      .withIndex('by_assignee_day', (q) => q.eq('assigneeKey', assigneeKey).eq('day', d))
+      .collect()
+    let removed = 0
+    for (const t of rows) {
+      if (t.status === 'done') {
+        await ctx.db.delete(t._id)
+        removed += 1
+      }
+    }
+    return removed
+  },
+})
+
 // Edit a task's title, due date, or type tag in place. Pass null to clear a
 // field; omit it to leave it unchanged.
 export const updateTask = mutation({

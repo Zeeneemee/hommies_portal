@@ -30,6 +30,8 @@ const propertyAddArgs = {
   bathrooms: v.optional(v.number()),
   tags: v.optional(v.array(v.string())),
   fullAddress: v.optional(v.string()),
+  // Source listing URL (PropertyGuru) — see schema. Drives Batch Add dedup.
+  listingUrl: v.optional(v.string()),
   commuteMins: v.optional(
     v.object({ NUS: v.number(), NTU: v.number(), SMU: v.number() }),
   ),
@@ -76,6 +78,18 @@ export const listForBackfill = internalQuery({
   handler: async (ctx) => {
     const rows = await ctx.db.query('properties').collect()
     return rows.map((p) => ({ _id: p._id, hasPoster: !!p.posterStorageId }))
+  },
+})
+
+// Just the source listing URLs of every saved property, for Batch Add's
+// duplicate detector. Returns the raw stored strings — the client normalizes
+// both these and the pasted links before comparing, so trivial URL variants
+// (trailing slash, query params, www, http/https) still match.
+export const listingUrls = query({
+  args: {},
+  handler: async (ctx) => {
+    const rows = await ctx.db.query('properties').collect()
+    return rows.map((p) => p.listingUrl).filter((u): u is string => !!u)
   },
 })
 

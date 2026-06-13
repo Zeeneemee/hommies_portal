@@ -45,6 +45,11 @@ export default defineSchema({
     // kinds later (furnishing, area, housing type).
     tags: v.optional(v.array(v.string())),
     fullAddress: v.optional(v.string()),
+    // Source listing URL the property was scraped from (PropertyGuru). Persisted
+    // so Batch Add can detect a link that was already scraped & saved before and
+    // skip re-scraping it. Absent on manually-entered rows and on rows created
+    // before this field existed.
+    listingUrl: v.optional(v.string()),
     commuteMins: v.optional(
       v.object({
         NUS: v.number(),

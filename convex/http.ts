@@ -95,12 +95,14 @@ http.route({
     const message = update?.message ?? update?.edited_message
     const text: string | undefined = message?.text
     const fromUserId: number | undefined = message?.from?.id
+    const fromUsername: string | undefined = message?.from?.username
     const chatId: number | undefined = message?.chat?.id
 
     // Only act on text messages from a user we can identify a chat to reply to.
     if (text && typeof fromUserId === 'number' && typeof chatId === 'number') {
       const reply = await ctx.runMutation(internal.telegram.handleCommand, {
         fromUserId,
+        fromUsername,
         text,
       })
       if (reply) {

@@ -31,5 +31,5 @@
 ## 7. Verify & roll out
 
 - [x] 7.1 Ran `vitest run` (151 passed, incl. 9 new bedroom-tag tests), `vite build` (frontend import of `convex/lib/bedroomTags` resolves), and `convex codegen` (backend TypeScript clean).
-- [ ] 7.2 Deploy Convex functions, then run `backfillBedroomTags` once against prod from the Convex dashboard/CLI; record the tagged/skipped/failed counts.
-- [ ] 7.3 Spot-check the Listings bedroom-tag filter against backfilled prod rows and confirm previously-untagged properties now appear.
+- [x] 7.2 Deployed Convex to prod (`keen-bandicoot-880`); ran `backfillBedroomTags` CLI-driven across all 130 poster rows → **63 tagged** (1BR×11, 2BR×24, 3BR×6, Studio×22), 67 skipped (poster had no derivable bedroom count), 0 failed. (Backfill reworked from a self-scheduling chain to CLI-driven batches after the chain died on a transient platform error.) Note: bathrooms is unrecoverable for legacy rows — posters never carried it and 0 rows have a stored listingUrl; accepted as forward-only.
+- [ ] 7.3 BLOCKED on frontend deploy — the tag filter is on `feat/telegram-standup-daily-brief` (Vercel preview only). `hommies-portal.vercel.app` builds from the prod branch (`feat/initial-implementation`); merge/cherry-pick `905092c` there to make the filter live, then spot-check.

@@ -3,6 +3,7 @@ import { useMutation, useQuery } from 'convex/react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Icon, Pill } from './ui.jsx'
 import ManualResponseModal from './ManualResponseModal.jsx'
+import ListingPreviewModal from './ListingPreviewModal.jsx'
 
 // Screen 5b — per-customer detail page. Reached by clicking a card on
 // /customers. Lists every property as a card; the operator marks which ones
@@ -31,6 +32,8 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
   const [hideSent, setHideSent] = React.useState(false)
   const [busyId, setBusyId] = React.useState(null)
   const [editingCustomer, setEditingCustomer] = React.useState(false)
+  // Read-only listing preview opened from a property card on this page.
+  const [previewProperty, setPreviewProperty] = React.useState(null)
 
   // Build a lookup of this customer's active assignments by propertyId.
   const activeByProp = React.useMemo(() => {
@@ -242,6 +245,7 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
               onUndoSent={() => handleUndoSent(property, assignment)}
               onCloseSale={(rent) => handleCloseSale(property, rent)}
               onUnclose={() => deal && handleUnclose(deal, property)}
+              onPreview={() => setPreviewProperty(property)}
             />
           ))}
         </div>
@@ -261,6 +265,10 @@ export default function CustomerDetail({ toast, responses = [], properties = [] 
             }
           }}
         />
+      )}
+
+      {previewProperty && (
+        <ListingPreviewModal property={previewProperty} onClose={() => setPreviewProperty(null)} />
       )}
     </div>
   )
@@ -367,7 +375,7 @@ function HeroCount({ label, value, kind }) {
   )
 }
 
-function PropertyMarkCard({ property: p, assignment, deal, state, busy, schoolKey, onMarkSent, onUndoSent, onCloseSale, onUnclose }) {
+function PropertyMarkCard({ property: p, assignment, deal, state, busy, schoolKey, onMarkSent, onUndoSent, onCloseSale, onUnclose, onPreview }) {
   const commute = p.commuteMins?.[schoolKey]
   const isSent = state === 'sent'
   const isQueued = state === 'pinned'
@@ -393,7 +401,15 @@ function PropertyMarkCard({ property: p, assignment, deal, state, busy, schoolKe
       className={`prop-mark-card prop-mark-card--${state}`}
       data-property-card={p._id}
     >
-      <div className="prop-mark-card-hero">
+      <div
+        className="prop-mark-card-hero"
+        onClick={onPreview}
+        role={onPreview ? 'button' : undefined}
+        tabIndex={onPreview ? 0 : undefined}
+        onKeyDown={onPreview ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPreview() } } : undefined}
+        title={onPreview ? 'View listing details' : undefined}
+        style={onPreview ? { cursor: 'pointer' } : undefined}
+      >
         {hero?.url ? (
           <img src={hero.url} alt={hero.name || p.condo} loading="lazy" />
         ) : p.videoUrl ? (
@@ -432,7 +448,18 @@ function PropertyMarkCard({ property: p, assignment, deal, state, busy, schoolKe
       </div>
       <div className="prop-mark-card-top">
         <div className="prop-mark-card-titles">
-          <div className="prop-mark-card-condo" title={p.condo}>{p.condo}</div>
+          {onPreview ? (
+            <button
+              type="button"
+              className="prop-mark-card-condo prop-mark-card-condo--link"
+              title={`View ${p.condo} listing`}
+              onClick={onPreview}
+            >
+              {p.condo}
+            </button>
+          ) : (
+            <div className="prop-mark-card-condo" title={p.condo}>{p.condo}</div>
+          )}
           <div className="prop-mark-card-sub">
             {[p.buildingType, p.area, p.unitType].filter(Boolean).join(' · ') || '—'}
           </div>
