@@ -6,9 +6,11 @@
 // Commands:
 //   /add <title>             add a todo to yourself for today
 //   /add @user <title>       assign a todo to a teammate for today
+//   /add_tasks [@user]       bulk add — one task per bulleted line (newline/•/;)
 //   /today                   list your tasks for today (numbered)
 //   /today @user             peek at a teammate's tasks for today
 //   /done <n>                mark your own task #n (from /today) done
+//   /done 1 3 5              mark several tasks done at once
 //   /done all                mark all your open tasks done
 //
 // Unknown senders (Telegram user id not in teamMembers) are ignored.
@@ -54,6 +56,16 @@ function renderList(name: string, tasks: Doc<'teamTasks'>[]): string {
   return `${name} — today:\n${lines.join('\n')}`
 }
 
+// Split a bulleted block into individual task titles. Tasks may be separated by
+// newlines, bullet dots (•), or semicolons; a leading list marker (-, *, –, ·)
+// on each line is stripped. Hyphenated words are left intact.
+function parseTaskLines(block: string): string[] {
+  return block
+    .split(/\r?\n|•|;/)
+    .map((s) => s.replace(/^\s*[-*–·]\s+/, '').trim())
+    .filter(Boolean)
+}
+
 // Returns the reply text, or null to stay silent (unknown sender). All db
 // writes happen here so the webhook can be a thin parse-and-reply shell.
 export const handleCommand = internalMutation({
@@ -66,15 +78,18 @@ export const handleCommand = internalMutation({
     if (!member) return null // ignore unrecognised senders — no write, no reply
 
     const raw = text.trim()
-    const spaceIdx = raw.indexOf(' ')
-    const cmd = (spaceIdx === -1 ? raw : raw.slice(0, spaceIdx)).toLowerCase().replace(/@.*$/, '')
-    let rest = spaceIdx === -1 ? '' : raw.slice(spaceIdx + 1).trim()
+    // Split off the command token on the FIRST whitespace (space OR newline) so
+    // multi-line bulleted input is preserved. Strip any @botname suffix that
+    // Telegram appends to commands in group chats (e.g. /add@hommiesSG_bot).
+    const cmdMatch = raw.match(/^(\S+)([\s\S]*)$/)
+    const cmd = (cmdMatch ? cmdMatch[1] : raw).toLowerCase().replace(/@.*$/, '')
+    let rest = (cmdMatch ? cmdMatch[2] : '').trim()
 
     // Optional leading @username target.
     let target: Doc<'teamMembers'> | null = null
     let targetName: string | null = null
     if (rest.startsWith('@')) {
-      const m = rest.match(/^@(\S+)\s*(.*)$/s)
+      const m = rest.match(/^@(\S+)([\s\S]*)$/)
       if (m) {
         targetName = m[1]
         rest = (m[2] || '').trim()
@@ -103,6 +118,35 @@ export const handleCommand = internalMutation({
           : `Added for ${assignee.name}: ${rest}`
       }
 
+      // Bulk add — one task per bullet/line. With @username assigns all to that
+      // teammate; without, all to the sender.
+      case '/add_tasks':
+      case '/addtasks': {
+        if (targetName && !target) {
+          return `No teammate with username @${targetName}. Try fu, tt, fred, or robert's @username.`
+        }
+        const assignee = target ?? member
+        const titles = parseTaskLines(rest)
+        if (titles.length === 0) {
+          return 'Usage:\n/add_tasks @username\n- first task\n- second task\n(omit @username to add to yourself)'
+        }
+        const now = Date.now()
+        for (const title of titles) {
+          await ctx.db.insert('teamTasks', {
+            assigneeKey: assignee.key,
+            title,
+            status: 'todo',
+            day: today(),
+            createdByKey: member.key,
+            source: 'telegram',
+            createdAt: now,
+          })
+        }
+        const who = assignee.key === member.key ? '' : ` for ${assignee.name}`
+        const lines = titles.map((t) => `- ${t}`).join('\n')
+        return `Added ${titles.length} task${titles.length > 1 ? 's' : ''}${who}:\n${lines}`
+      }
+
       case '/today': {
         if (targetName && !target) {
           return `No teammate with username @${targetName}.`
@@ -113,9 +157,9 @@ export const handleCommand = internalMutation({
       }
 
       case '/done': {
+        const tasks = await tasksForToday(ctx, member.key)
         // "/done all" marks every open task done.
         if (rest.trim().toLowerCase() === 'all') {
-          const tasks = await tasksForToday(ctx, member.key)
           let changed = 0
           for (const t of tasks) {
             if (t.status !== 'done') {
@@ -127,13 +171,31 @@ export const handleCommand = internalMutation({
             ? `Marked ${changed} task${changed > 1 ? 's' : ''} done.`
             : 'No open tasks to mark done.'
         }
-        const n = parseInt(rest, 10)
-        if (!n || n < 1) return 'Usage: /done <number> or /done all (numbers from /today).'
-        const tasks = await tasksForToday(ctx, member.key)
-        const task = tasks[n - 1]
-        if (!task) return `No task #${n} in your list today. Send /today to check.`
-        await ctx.db.patch(task._id, { status: 'done', doneAt: Date.now() })
-        return `Done: ${task.title}`
+        // "/done 1 3 5" or "/done 1,3,5" — mark several at once.
+        const nums = (rest.match(/\d+/g) || []).map(Number).filter((n) => n >= 1)
+        if (nums.length === 0) {
+          return 'Usage: /done <number>, /done 1 3 5, or /done all (numbers from /today).'
+        }
+        const doneTitles: string[] = []
+        const missing: number[] = []
+        // Resolve all indices first (against the same /today ordering), then patch.
+        for (const n of [...new Set(nums)]) {
+          const task = tasks[n - 1]
+          if (!task) {
+            missing.push(n)
+          } else {
+            if (task.status !== 'done') {
+              await ctx.db.patch(task._id, { status: 'done', doneAt: Date.now() })
+            }
+            doneTitles.push(task.title)
+          }
+        }
+        if (doneTitles.length === 0) {
+          return `No task${missing.length > 1 ? 's' : ''} #${missing.join(', ')} in your list today. Send /today to check.`
+        }
+        const body = doneTitles.map((t) => `- ${t}`).join('\n')
+        const tail = missing.length ? `\n(no #${missing.join(', ')})` : ''
+        return `Done ${doneTitles.length} task${doneTitles.length > 1 ? 's' : ''}:\n${body}${tail}`
       }
 
       case '/start':
@@ -142,9 +204,11 @@ export const handleCommand = internalMutation({
           `Hi ${member.name}! Commands:`,
           '/add <task> — add a todo to yourself',
           '/add @username <task> — assign to a teammate',
+          '/add_tasks [@username] then bulleted lines — add many at once',
           '/today — your tasks (numbered)',
           '/today @username — a teammate\'s tasks',
           '/done <n> — mark your task #n done',
+          '/done 1 3 5 — mark several done',
           '/done all — mark all your tasks done',
         ].join('\n')
 

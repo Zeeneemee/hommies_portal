@@ -45,6 +45,14 @@ The system SHALL support command-based interactions that let a teammate add a ta
 - **WHEN** a recognized teammate sends the list command targeting another teammate's `@username`
 - **THEN** the bot replies with the named teammate's tasks for today (read-only)
 
+#### Scenario: Bulk-add tasks via bot
+- **WHEN** a recognized teammate sends a bulk-add command followed by several bulleted lines, optionally targeting a teammate's `@username`
+- **THEN** the system creates one task per non-empty line assigned to the target (or the sender if no username) for today and confirms with the list
+
 #### Scenario: Complete a task via bot
 - **WHEN** a recognized teammate sends a command to mark one of their own tasks done
 - **THEN** the system sets that task's status to `done` and the portal reflects the change in real time
+
+#### Scenario: Complete several tasks at once via bot
+- **WHEN** a recognized teammate sends a done command with multiple task numbers (e.g. `1 3 5`)
+- **THEN** the system marks each listed task done and confirms; unknown numbers are reported without failing the rest

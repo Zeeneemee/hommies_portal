@@ -72,6 +72,26 @@ export const setTelegram = mutation({
   },
 })
 
+// Set (or update) just a teammate's Telegram @username, without needing the
+// numeric user id. Stored normalised: no leading '@', lowercased.
+export const setUsername = mutation({
+  args: {
+    key: MEMBER_KEY,
+    telegramUsername: v.string(),
+  },
+  handler: async (ctx, { key, telegramUsername }) => {
+    const row = await ctx.db
+      .query('teamMembers')
+      .withIndex('by_key', (q) => q.eq('key', key))
+      .unique()
+    if (!row) throw new Error(`No teamMember with key ${key} — run team:seed first.`)
+    await ctx.db.patch(row._id, {
+      telegramUsername: telegramUsername.replace(/^@/, '').toLowerCase(),
+    })
+    return row._id
+  },
+})
+
 // --- internal lookups, shared by the Telegram handler -------------------
 export async function memberByTelegramUserId(
   ctx: any,
