@@ -79,7 +79,7 @@ function messageToWire(m) {
 export default function AddPropertyChat({ toast, onSaved, draft }) {
   // Existing convex actions reused via the dispatcher.
   const chatTurn = useAction('chat:turn')
-  const extractPropertyGuruUrl = useAction('extraction:extractPropertyGuruUrl')
+  const extractListing = useAction('extraction:extractListingUrl')
   const fetchImagesAsData = useAction('extraction:fetchImagesAsData')
   const generatePosterContent = useAction('ai:generatePosterContent')
   const generateUploadUrl = useMutation('properties:generateUploadUrl')
@@ -187,7 +187,7 @@ export default function AddPropertyChat({ toast, onSaved, draft }) {
           case 'extractFromPropertyGuruUrl': {
             const url = String(args?.url || '').trim()
             if (!url) return { ok: false, error: 'url is empty' }
-            const res = await extractPropertyGuruUrl({ url })
+            const res = await extractListing({ url })
             if (!res?.ok) return { ok: false, error: res?.error || res?.note || 'extraction failed' }
             // Merge lifted fields into draft.extracted.
             if (res.fields && typeof res.fields === 'object') {
@@ -307,7 +307,7 @@ export default function AddPropertyChat({ toast, onSaved, draft }) {
       }
     },
     [condo, images, videoFile, extracted, setCondo, setExtracted, setImages, setPosterFile,
-      extractPropertyGuruUrl, fetchImagesAsData, generatePosterContent],
+      extractListing, fetchImagesAsData, generatePosterContent],
   )
 
   // ─────────────────────────────────────────────────────────────────────

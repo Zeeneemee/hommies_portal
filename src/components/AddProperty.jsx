@@ -85,7 +85,7 @@ function AddPropertySingle({ toast, onSaved, draft }) {
   const addProperty = useMutation('properties:add')
   const generateUploadUrl = useMutation('properties:generateUploadUrl')
   const extractPosterDetails = useAction('extraction:extractPosterDetails')
-  const extractPropertyGuruUrl = useAction('extraction:extractPropertyGuruUrl')
+  const extractListing = useAction('extraction:extractListingUrl')
   const fetchImagesAsData = useAction('extraction:fetchImagesAsData')
   const generatePosterContent = useAction('ai:generatePosterContent')
 
@@ -261,12 +261,12 @@ function AddPropertySingle({ toast, onSaved, draft }) {
   async function handleExtractUrl() {
     const url = pgUrl.trim()
     if (!url) {
-      toast('Paste a PropertyGuru listing URL first.')
+      toast('Paste a PropertyGuru or 99.co listing URL first.')
       return
     }
     setExtracting(true)
     try {
-      const res = await extractPropertyGuruUrl({ url })
+      const res = await extractListing({ url })
       console.log('[extract] response', res)
       if (!res?.ok) {
         toast(res?.error || 'Nothing could be lifted from that link.')
@@ -529,7 +529,7 @@ function AddPropertySingle({ toast, onSaved, draft }) {
 
       <div className="card" style={{ marginBottom: 18 }}>
         <div className="card-head">
-          <h3 className="card-title">Have a PropertyGuru link?</h3>
+          <h3 className="card-title">Have a PropertyGuru or 99.co link?</h3>
           <p className="card-sub">
             Paste a listing URL — we'll fetch it and lift rent, area, building type, and the condo name. Some
             listings sit behind a Cloudflare challenge and will need manual entry instead.
@@ -542,7 +542,7 @@ function AddPropertySingle({ toast, onSaved, draft }) {
               type="url"
               value={pgUrl}
               onChange={(e) => setPgUrl(e.target.value)}
-              placeholder="https://www.propertyguru.com.sg/listing/…"
+              placeholder="propertyguru.com.sg/listing/… or 99.co/singapore/rent/…"
               style={{ flex: 1 }}
               disabled={extracting}
             />

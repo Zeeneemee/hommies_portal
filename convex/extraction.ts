@@ -279,6 +279,22 @@ function isPropertyGuruUrl(url: string): boolean {
   }
 }
 
+function is99coUrl(url: string): boolean {
+  try {
+    const u = new URL(url)
+    return /(^|\.)99\.co$/i.test(u.hostname)
+  } catch {
+    return false
+  }
+}
+
+// Both supported listing sources share the same scrape → distill → Gemini
+// pipeline; only URL matching, image-CDN patterns, and the PG-only project page
+// differ.
+function isSupportedListingUrl(url: string): boolean {
+  return isPropertyGuruUrl(url) || is99coUrl(url)
+}
+
 // Scrape PropertyGuru listings via Firecrawl `/v1/scrape`. Requires
 // FIRECRAWL_API_KEY in Convex env. Firecrawl bypasses Cloudflare and
 // JS-renders by default, so lazy-loaded gallery images appear in the HTML.
@@ -414,6 +430,20 @@ function extractImageUrls(html: string): string[] {
       add(u)
     }
   }
+  // 99.co serves listing photos from pic2.99.co/v3/<id>?... with NO file
+  // extension, so the extension-based sweeps above miss them. Capture them
+  // explicitly and dedupe by the stable <id> so the same photo at different
+  // render sizes isn't imported twice. (assets-*.99.co holds UI icons/SVGs,
+  // not photos, and isn't matched.)
+  const seen99 = new Set<string>()
+  for (const m of unescaped.matchAll(
+    /https?:\/\/pic\d*\.99\.co\/v3\/([A-Za-z0-9_-]+)[^\s"'<>\\]*/gi,
+  )) {
+    const id = m[1]
+    if (seen99.has(id)) continue
+    seen99.add(id)
+    urls.add(m[0].replace(/&amp;/g, '&'))
+  }
   return Array.from(urls).slice(0, 20)
 }
 
@@ -441,7 +471,7 @@ async function extractUrlWithGemini(distilled: string): Promise<{
   const model = process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL
   const ai = new GoogleGenAI({ apiKey })
 
-  const SYSTEM = `You read the distilled HTML of a PropertyGuru Singapore listing page and extract structured facts.
+  const SYSTEM = `You read the distilled HTML of a Singapore property rental listing page (PropertyGuru or 99.co) and extract structured facts.
 
 Return ONLY a single JSON object (NOT an array, NOT wrapped in [...]) — no prose, no markdown fences. The response must start with { and end with }. Use these exact keys; omit any key you cannot confidently determine from the page content. Do not invent values.
 
@@ -514,15 +544,13 @@ Strip "S$", "$", commas from numeric values. If the listing says "Studio" use un
   }
 }
 
-export const extractPropertyGuruUrl = action({
-  args: { url: v.string() },
-  handler: async (_ctx, { url }) => {
-    if (!isPropertyGuruUrl(url)) {
+async function listingExtractionHandler(_ctx: any, { url }: { url: string }) {
+    if (!isSupportedListingUrl(url)) {
       return {
         ok: false,
         fields: {},
         suggestedCondo: undefined as string | undefined,
-        error: 'URL must be on propertyguru.com.sg',
+        error: 'URL must be on propertyguru.com.sg or 99.co',
       }
     }
 
@@ -555,17 +583,19 @@ export const extractPropertyGuruUrl = action({
         : hasProxy
         ? 'The proxy returned a block. Some listings need premium proxy / JS rendering — enable those flags or try a different listing.'
         : 'Set SCRAPER_API_KEY or SCRAPINGBEE_API_KEY in Convex env to route through a residential proxy.'
+      const site = is99coUrl(url) ? '99.co' : 'PropertyGuru'
       return {
         ok: false,
         fields: {},
         suggestedCondo: undefined as string | undefined,
-        error: `PropertyGuru ${blocked}. ${hint}`,
+        error: `${site} ${blocked}. ${hint}`,
       }
     }
 
     const distilled = distillHtml(html)
     const imageUrls = extractImageUrls(html)
-    const projectUrl = extractProjectUrl(html)
+    // Only PropertyGuru has a development-level project page to grab.
+    const projectUrl = isPropertyGuruUrl(url) ? extractProjectUrl(html) : undefined
     const { fields, suggestedCondo, note } = await extractUrlWithGemini(distilled)
     return {
       ok: Object.keys(fields).length > 0 || !!suggestedCondo || imageUrls.length > 0,
@@ -575,7 +605,19 @@ export const extractPropertyGuruUrl = action({
       projectUrl,
       note,
     }
-  },
+}
+
+export const extractListingUrl = action({
+  args: { url: v.string() },
+  handler: listingExtractionHandler,
+})
+
+// Deprecated alias — kept for one rollout so clients still on the pre-rename
+// frontend bundle (which calls extractPropertyGuruUrl) keep working during the
+// Vercel deploy window. Safe to remove once prod has served the renamed build.
+export const extractPropertyGuruUrl = action({
+  args: { url: v.string() },
+  handler: listingExtractionHandler,
 })
 
 // Fetch + distill a PropertyGuru project page (the development-level URL

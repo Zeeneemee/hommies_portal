@@ -118,7 +118,7 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
     () => new Set(savedListingUrls.map(normalizeListingUrl).filter(Boolean)),
     [savedListingUrls],
   )
-  const extractPropertyGuruUrl = useAction('extraction:extractPropertyGuruUrl')
+  const extractListing = useAction('extraction:extractListingUrl')
   const fetchImagesAsData = useAction('extraction:fetchImagesAsData')
   const generatePosterContent = useAction('ai:generatePosterContent')
   const extractPosterDetails = useAction('extraction:extractPosterDetails')
@@ -145,7 +145,7 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
     async function extractRow(row) {
       try {
         updateRow(row.id, { status: 'extracting', error: null })
-        const res = await extractPropertyGuruUrl({ url: row.url })
+        const res = await extractListing({ url: row.url })
         if (!res?.ok) {
           updateRow(row.id, {
             status: 'failed',
@@ -210,7 +210,7 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
     }
 
     tick()
-  }, [rows, maxParallel, paused, updateRow, extractPropertyGuruUrl, fetchImagesAsData])
+  }, [rows, maxParallel, paused, updateRow, extractListing, fetchImagesAsData])
 
   function handleAddUrls() {
     const tokens = urlInput.split(/\s+/).map((s) => s.trim()).filter(Boolean)
@@ -554,7 +554,7 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
             className="input"
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
-            placeholder={`Paste PropertyGuru URLs (one per line, up to ${MAX_ROWS})`}
+            placeholder={`Paste PropertyGuru or 99.co URLs (one per line, up to ${MAX_ROWS})`}
             rows={2}
             style={{ flex: 1, fontFamily: 'inherit', resize: 'vertical' }}
           />
@@ -570,7 +570,7 @@ export default function BatchAddProperty({ toast, draft, embedded = false }) {
             <Icon name="list" size={28} />
             <div style={{ marginTop: 8, fontWeight: 600, color: 'var(--ink)' }}>No rows yet</div>
             <div style={{ fontSize: 13, marginTop: 4 }}>
-              Paste PropertyGuru URLs above. Each link becomes one row — extraction begins automatically.
+              Paste PropertyGuru or 99.co URLs above. Each link becomes one row — extraction begins automatically.
               Up to {MAX_ROWS} rows per batch. Image and poster files live in memory only — a refresh clears them.
             </div>
           </div>
