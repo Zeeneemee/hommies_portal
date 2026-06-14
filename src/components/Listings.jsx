@@ -582,6 +582,16 @@ function ListingCard({ property: p, orphan, closed, onEdit, onOpenInRecommend, t
                 <Icon name="pdf" size={12} /> Open poster
               </a>
             )}
+            {p.posterUrl && (
+              <a
+                className="listing-poster-link"
+                href={p.posterUrl}
+                download={p.posterName || `${p.condo || 'poster'}.pdf`}
+                title="Download poster"
+              >
+                <Icon name="download" size={12} /> Download
+              </a>
+            )}
             <StatusPill status={p.status} />
           </div>
         </div>
