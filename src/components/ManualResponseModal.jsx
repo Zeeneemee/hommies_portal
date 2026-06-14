@@ -6,6 +6,7 @@ const EMPTY_RESPONSE = {
   channel: 'WhatsApp',
   contact: '',
   school: 'NUS',
+  gender: undefined,
   moveIn: '',
   leaseLength: '12 months',
   budget: { min: 1200, max: 1600 },
@@ -97,6 +98,17 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
 
             <Field label="School" span={3}>
               <Segment options={['NUS', 'NTU', 'SMU']} value={r.school} onChange={(v) => upd('school', v)} />
+            </Field>
+            <Field label="Gender" span={3}>
+              <select
+                className="select"
+                value={r.gender || ''}
+                onChange={(e) => upd('gender', e.target.value || undefined)}
+              >
+                <option value="">Unspecified</option>
+                <option value="Male">Male</option>
+                <option value="Female">Female</option>
+              </select>
             </Field>
             <Field label="Move-in" span={3}>
               <input className="input" type="date" value={r.moveIn} onChange={(e) => upd('moveIn', e.target.value)} />
@@ -205,6 +217,7 @@ export default function ManualResponseModal({ onClose, onSave, initialValue }) {
                 channel: r.channel,
                 contact: r.contact,
                 school: r.school,
+                gender: r.gender,
                 moveIn: r.moveIn,
                 leaseLength: r.leaseLength,
                 budget: r.budget,

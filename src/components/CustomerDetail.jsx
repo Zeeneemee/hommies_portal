@@ -314,6 +314,7 @@ function CustomerHero({ response: r, counts, onEdit }) {
             <Pill kind={r.school === 'NUS' ? 'orange' : r.school === 'OTHER' ? 'grey' : 'navy'} dot>
               {r.school}
             </Pill>
+            {r.gender && <Pill kind="grey">{r.gender}</Pill>}
             <Pill kind={sourceLabel === 'csv' ? 'navy' : sourceLabel === 'form' ? 'orange' : 'grey'}>
               {sourceLabel}
             </Pill>

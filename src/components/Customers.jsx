@@ -475,6 +475,7 @@ function CustomerCard({ response: r, engagement, onOpen, onEdit, onDelete }) {
             <Pill kind={r.school === 'NUS' ? 'orange' : r.school === 'OTHER' ? 'grey' : 'navy'} dot>
               {r.school}
             </Pill>
+            {r.gender && <Pill kind="grey">{r.gender}</Pill>}
             <Pill kind={sourceKind}>{sourceLabel}</Pill>
           </div>
         </div>

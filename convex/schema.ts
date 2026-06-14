@@ -103,6 +103,9 @@ export default defineSchema({
     channel: v.string(),
     contact: v.string(),
     school: v.string(),
+    // Optional — absent means "Unspecified". Operator-entered in the manual
+    // customer form; Google-form customers arrive without it.
+    gender: v.optional(v.union(v.literal('Male'), v.literal('Female'))),
     moveIn: v.string(),
     leaseLength: v.string(),
     budget: v.object({ min: v.number(), max: v.number() }),
