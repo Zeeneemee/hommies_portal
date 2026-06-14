@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom'
 import { Pill, StatusPill, Icon } from './ui.jsx'
 import ListingEditModal from './ListingEditModal.jsx'
 import { BEDROOM_TAG_RE } from '../../convex/lib/bedroomTags'
+import { downloadFile } from '../downloadFile.js'
 
 // Stable display order for bedroom tags in the filter dropdown.
 const BEDROOM_TAG_ORDER = (t) => (t === 'Studio' ? 0 : Number(t.replace('BR', '')) || 99)
@@ -588,6 +589,10 @@ function ListingCard({ property: p, orphan, closed, onEdit, onOpenInRecommend, t
                 href={p.posterUrl}
                 download={p.posterName || `${p.condo || 'poster'}.pdf`}
                 title="Download poster"
+                onClick={(e) => {
+                  e.preventDefault()
+                  downloadFile(p.posterUrl, p.posterName || `${p.condo || 'poster'}.pdf`)
+                }}
               >
                 <Icon name="download" size={12} /> Download
               </a>

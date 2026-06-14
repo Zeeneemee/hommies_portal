@@ -1,5 +1,6 @@
 import React from 'react'
 import { Icon, StatusPill, Pill } from './ui.jsx'
+import { downloadFile } from '../downloadFile.js'
 
 // Read-only listing preview. Surfaced from the Recommend screen so the
 // operator can see a property's media + details (photos, video, poster,
@@ -176,6 +177,10 @@ export default function ListingPreviewModal({ property: p, onClose }) {
                   href={p.posterUrl}
                   download={p.posterName || `${p.condo || 'poster'}.pdf`}
                   title="Download poster"
+                  onClick={(e) => {
+                    e.preventDefault()
+                    downloadFile(p.posterUrl, p.posterName || `${p.condo || 'poster'}.pdf`)
+                  }}
                 >
                   <Icon name="download" size={12} /> Download
                 </a>
