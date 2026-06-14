@@ -62,7 +62,7 @@ export default function ListingPreviewModal({ property: p, onClose }) {
     >
       <div
         className="card"
-        style={{ width: 620, maxHeight: '90vh', overflow: 'auto' }}
+        style={{ width: 'min(620px, calc(100vw - 24px))', maxHeight: '90vh', overflow: 'auto' }}
         onClick={(e) => e.stopPropagation()}
       >
         <div
@@ -159,6 +159,7 @@ export default function ListingPreviewModal({ property: p, onClose }) {
               alignItems: 'center',
               justifyContent: 'space-between',
               gap: 8,
+              flexWrap: 'wrap',
               marginTop: 16,
               paddingTop: 14,
               borderTop: '1px solid var(--hairline)',
@@ -166,9 +167,19 @@ export default function ListingPreviewModal({ property: p, onClose }) {
           >
             <StatusPill status={p.status} />
             {p.posterUrl && (
-              <a className="listing-poster-link" href={p.posterUrl} target="_blank" rel="noreferrer">
-                <Icon name="pdf" size={12} /> Open poster
-              </a>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <a className="listing-poster-link" href={p.posterUrl} target="_blank" rel="noreferrer">
+                  <Icon name="pdf" size={12} /> Open poster
+                </a>
+                <a
+                  className="listing-poster-link"
+                  href={p.posterUrl}
+                  download={p.posterName || `${p.condo || 'poster'}.pdf`}
+                  title="Download poster"
+                >
+                  <Icon name="download" size={12} /> Download
+                </a>
+              </div>
             )}
           </div>
         </div>
