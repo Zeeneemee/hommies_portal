@@ -653,67 +653,6 @@ export const fetchProjectPageText = action({
 // Cap at 8 images / ~6MB total: Convex action responses are bounded and PG
 // hero images are already ~150-300KB each. Failed URLs are reported in
 // `skipped` rather than aborting the whole batch.
-// Residential-proxy URL for `target`, using whichever scraping-proxy key is
-// configured in Convex env. Returns null when none is set. The premium/super
-// flags are what get through Cloudflare (e.g. 99.co's pic2.99.co image CDN);
-// without them the proxy is just a plain datacenter fetch and still 403s.
-function buildImageProxy(target: string): { name: string; url: string } | null {
-  const enc = encodeURIComponent(target)
-  if (process.env.SCRAPER_API_KEY)
-    return { name: 'scraperapi', url: `https://api.scraperapi.com/?api_key=${process.env.SCRAPER_API_KEY}&url=${enc}&premium=true&render=false` }
-  if (process.env.SCRAPINGBEE_API_KEY)
-    return { name: 'scrapingbee', url: `https://app.scrapingbee.com/api/v1/?api_key=${process.env.SCRAPINGBEE_API_KEY}&url=${enc}&render_js=false&premium_proxy=true` }
-  if (process.env.SCRAPEDO_API_KEY)
-    return { name: 'scrapedo', url: `https://api.scrape.do/?token=${process.env.SCRAPEDO_API_KEY}&url=${enc}&super=true` }
-  return null
-}
-
-// Fetch one image's bytes. Try a direct hotlink fetch first (free, works for
-// PropertyGuru's CDN). If the host blocks it (e.g. 99.co sits behind
-// Cloudflare), retry through a residential proxy when a key is configured.
-async function fetchImageBytes(
-  url: string,
-): Promise<{ ok: true; buf: Uint8Array; contentType: string; via: string } | { ok: false; reason: string }> {
-  const referer = /(^|\.|\/\/)(?:[a-z0-9-]+\.)*99\.co\b/i.test(url)
-    ? 'https://www.99.co/'
-    : 'https://www.propertyguru.com.sg/'
-  const headers = {
-    'User-Agent':
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-    Accept: 'image/avif,image/webp,image/*,*/*;q=0.8',
-    Referer: referer,
-  }
-  let directReason = ''
-  try {
-    const res = await fetch(url, { redirect: 'follow', headers })
-    if (res.ok) {
-      const buf = new Uint8Array(await res.arrayBuffer())
-      return { ok: true, buf, contentType: res.headers.get('content-type') || 'image/jpeg', via: 'direct' }
-    }
-    directReason = `HTTP ${res.status}`
-  } catch (err: any) {
-    directReason = err?.message || 'fetch failed'
-  }
-  const proxy = buildImageProxy(url)
-  if (!proxy) {
-    return {
-      ok: false,
-      reason: `${directReason} (blocked — set SCRAPER_API_KEY / SCRAPINGBEE_API_KEY / SCRAPEDO_API_KEY in Convex env to fetch Cloudflare-protected images)`,
-    }
-  }
-  try {
-    const res = await fetch(proxy.url, { redirect: 'follow' })
-    if (!res.ok) return { ok: false, reason: `${directReason}; ${proxy.name} HTTP ${res.status}` }
-    const contentType = res.headers.get('content-type') || 'image/jpeg'
-    // A proxy that hit an error/challenge page returns HTML, not image bytes.
-    if (/text\/html/i.test(contentType)) return { ok: false, reason: `${proxy.name} returned HTML, not an image` }
-    const buf = new Uint8Array(await res.arrayBuffer())
-    return { ok: true, buf, contentType, via: proxy.name }
-  } catch (err: any) {
-    return { ok: false, reason: `${directReason}; ${proxy.name} ${err?.message || 'failed'}` }
-  }
-}
-
 export const fetchImagesAsData = action({
   args: { urls: v.array(v.string()) },
   handler: async (_ctx, { urls }) => {
@@ -722,22 +661,41 @@ export const fetchImagesAsData = action({
     let totalBytes = 0
     const BYTE_BUDGET = 10 * 1024 * 1024
     for (const url of urls.slice(0, 12)) {
-      const r = await fetchImageBytes(url)
-      if (!r.ok) { skipped.push({ url, reason: r.reason }); continue }
-      const buf = r.buf
-      if (buf.length === 0) { skipped.push({ url, reason: 'empty body' }); continue }
-      if (totalBytes + buf.length > BYTE_BUDGET) { skipped.push({ url, reason: 'byte budget exceeded' }); continue }
-      totalBytes += buf.length
-      let bin = ''
-      for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
-      const dataB64 = btoa(bin)
-      let name = 'listing-image.jpg'
       try {
-        const parsed = new URL(url)
-        const seg = parsed.pathname.split('/').pop() || ''
-        if (seg && /\.(jpg|jpeg|png|webp)$/i.test(seg)) name = seg
-      } catch { /* ignore */ }
-      images.push({ name, contentType: r.contentType, size: buf.length, dataB64 })
+        // Hotlink protection keys off the Referer, so match the listing's own
+        // site. (Cloudflare-fronted CDNs like 99.co's pic2.99.co still block a
+        // server fetch regardless — those photos need a manual upload.)
+        const referer = /(^|\.|\/\/)(?:[a-z0-9-]+\.)*99\.co\b/i.test(url)
+          ? 'https://www.99.co/'
+          : 'https://www.propertyguru.com.sg/'
+        const res = await fetch(url, {
+          redirect: 'follow',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
+            Accept: 'image/avif,image/webp,image/*,*/*;q=0.8',
+            Referer: referer,
+          },
+        })
+        if (!res.ok) { skipped.push({ url, reason: `HTTP ${res.status}` }); continue }
+        const buf = new Uint8Array(await res.arrayBuffer())
+        if (buf.length === 0) { skipped.push({ url, reason: 'empty body' }); continue }
+        if (totalBytes + buf.length > BYTE_BUDGET) { skipped.push({ url, reason: 'byte budget exceeded' }); continue }
+        totalBytes += buf.length
+        let bin = ''
+        for (let i = 0; i < buf.length; i++) bin += String.fromCharCode(buf[i])
+        const dataB64 = btoa(bin)
+        const contentType = res.headers.get('content-type') || 'image/jpeg'
+        let name = 'listing-image.jpg'
+        try {
+          const parsed = new URL(url)
+          const seg = parsed.pathname.split('/').pop() || ''
+          if (seg && /\.(jpg|jpeg|png|webp)$/i.test(seg)) name = seg
+        } catch { /* ignore */ }
+        images.push({ name, contentType, size: buf.length, dataB64 })
+      } catch (err: any) {
+        skipped.push({ url, reason: err?.message || 'fetch failed' })
+      }
     }
     return { images, skipped }
   },
