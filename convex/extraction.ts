@@ -295,39 +295,65 @@ function isSupportedListingUrl(url: string): boolean {
   return isPropertyGuruUrl(url) || is99coUrl(url)
 }
 
-// Scrape PropertyGuru listings via Firecrawl `/v1/scrape`. Requires
-// FIRECRAWL_API_KEY in Convex env. Firecrawl bypasses Cloudflare and
-// JS-renders by default, so lazy-loaded gallery images appear in the HTML.
-async function proxiedFetch(targetUrl: string): Promise<{ status: number; html: string }> {
+// Scrape a listing page via Firecrawl `/v1/scrape`. Requires FIRECRAWL_API_KEY.
+// Firecrawl bypasses Cloudflare and JS-renders by default. Returns null when no
+// key is configured so the caller can fall back. A 402 here means the Firecrawl
+// plan is out of credits.
+async function firecrawlFetch(targetUrl: string): Promise<{ status: number; html: string } | null> {
   const apiKey = process.env.FIRECRAWL_API_KEY
-  if (!apiKey) {
-    return { status: 500, html: '' }
+  if (!apiKey) return null
+  try {
+    const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: targetUrl, formats: ['html'], onlyMainContent: false }),
+    })
+    if (!res.ok) return { status: res.status, html: '' }
+    const payload = (await res.json()) as {
+      success?: boolean
+      data?: { html?: string; metadata?: { statusCode?: number } }
+    }
+    const status = payload.data?.metadata?.statusCode ?? (payload.success ? 200 : 502)
+    return { status, html: payload.data?.html ?? '' }
+  } catch {
+    return { status: 502, html: '' }
   }
+}
 
-  const res = await fetch('https://api.firecrawl.dev/v1/scrape', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      url: targetUrl,
-      formats: ['html'],
-      onlyMainContent: false,
-    }),
+// ScrapingBee fallback — renders JS and routes through a premium
+// (Cloudflare-bypassing) proxy, returning the page HTML directly in the body.
+// Used when Firecrawl is missing or out of credits. Requires SCRAPINGBEE_API_KEY.
+async function scrapingBeeFetch(targetUrl: string): Promise<{ status: number; html: string } | null> {
+  const apiKey = process.env.SCRAPINGBEE_API_KEY
+  if (!apiKey) return null
+  const params = new URLSearchParams({
+    api_key: apiKey,
+    url: targetUrl,
+    render_js: 'true',
+    premium_proxy: 'true',
+    country_code: 'sg',
   })
-
-  if (!res.ok) {
-    return { status: res.status, html: '' }
+  try {
+    const res = await fetch(`https://app.scrapingbee.com/api/v1/?${params.toString()}`)
+    if (!res.ok) return { status: res.status, html: '' }
+    const html = await res.text()
+    // ScrapingBee echoes the target's own status in this header on success.
+    const original = Number(res.headers.get('spb-original-status'))
+    const status = Number.isFinite(original) && original > 0 ? original : 200
+    return { status, html }
+  } catch {
+    return { status: 502, html: '' }
   }
+}
 
-  const payload = (await res.json()) as {
-    success?: boolean
-    data?: { html?: string; metadata?: { statusCode?: number } }
-  }
-  const status = payload.data?.metadata?.statusCode ?? (payload.success ? 200 : 502)
-  const html = payload.data?.html ?? ''
-  return { status, html }
+// Firecrawl first (no extra cost when it has credits); fall back to ScrapingBee
+// when Firecrawl is unavailable, errored, or out of credits (HTTP 402).
+async function proxiedFetch(targetUrl: string): Promise<{ status: number; html: string }> {
+  const fc = await firecrawlFetch(targetUrl)
+  if (fc && fc.html && fc.status < 400) return fc
+  const sb = await scrapingBeeFetch(targetUrl)
+  if (sb && sb.html && sb.status < 400) return sb
+  return fc ?? sb ?? { status: 500, html: '' }
 }
 
 function looksBlocked(html: string, status: number): string | null {
@@ -571,18 +597,15 @@ async function listingExtractionHandler(_ctx: any, { url }: { url: string }) {
 
     const blocked = looksBlocked(html, status)
     if (blocked) {
-      const hasProxy = !!(process.env.SCRAPEDO_API_KEY || process.env.SCRAPER_API_KEY || process.env.SCRAPINGBEE_API_KEY)
-      const head = html.slice(0, 500).toLowerCase()
-      const quotaHit =
-        head.includes('exhausted the api credits') ||
-        head.includes('exhausted your') ||
-        head.includes('monthly cycle') ||
-        head.includes('credit limit')
-      const hint = quotaHit
-        ? 'Scraping proxy is out of credits. Upgrade the plan, enable overages, or wait for the next billing cycle.'
-        : hasProxy
-        ? 'The proxy returned a block. Some listings need premium proxy / JS rendering — enable those flags or try a different listing.'
-        : 'Set SCRAPER_API_KEY or SCRAPINGBEE_API_KEY in Convex env to route through a residential proxy.'
+      const hasScrapingBee = !!process.env.SCRAPINGBEE_API_KEY
+      const hint =
+        status === 402
+          ? hasScrapingBee
+            ? 'Firecrawl is out of credits and the ScrapingBee fallback also failed — check the SCRAPINGBEE_API_KEY / its credits.'
+            : 'Firecrawl is out of credits. Add Firecrawl credits, or set SCRAPINGBEE_API_KEY in Convex env to fall back to ScrapingBee.'
+          : hasScrapingBee
+          ? 'Both Firecrawl and ScrapingBee failed on this listing — it may need a heavier proxy, or try a different listing.'
+          : 'Set SCRAPINGBEE_API_KEY in Convex env to fall back to ScrapingBee when Firecrawl is blocked or out of credits.'
       const site = is99coUrl(url) ? '99.co' : 'PropertyGuru'
       return {
         ok: false,
