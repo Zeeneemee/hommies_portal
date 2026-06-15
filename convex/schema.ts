@@ -294,4 +294,16 @@ export default defineSchema({
   })
     .index('by_response', ['responseId'])
     .index('by_assignee', ['assigneeKey']),
+
+  // Server-side scrape cache — one row per normalized listing/project URL so a
+  // given page is fetched through Firecrawl/ScrapingBee at most once per TTL
+  // window. Keeps batch re-extraction, poster regeneration, and same-development
+  // project pages from each re-spending proxy credits. Only successful scrapes
+  // are stored; entries older than the TTL (see extraction.ts) are re-scraped.
+  scrapeCache: defineTable({
+    urlKey: v.string(),
+    html: v.string(),
+    status: v.number(),
+    fetchedAt: v.number(),
+  }).index('by_urlKey', ['urlKey']),
 })

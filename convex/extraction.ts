@@ -8,7 +8,12 @@ import { api, internal } from './_generated/api'
 import { v } from 'convex/values'
 import { parsePosterText } from './posterExtraction'
 import { deriveBedroomTag, mergeBedroomTag } from './lib/bedroomTags'
+import { normalizeListingUrl } from './lib/listingUrl'
 import { GoogleGenAI } from '@google/genai'
+
+// Scrape cache TTL — a page fetched within this window is served from the
+// scrapeCache table instead of re-spending proxy credits.
+const SCRAPE_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash'
 
@@ -348,12 +353,50 @@ async function scrapingBeeFetch(targetUrl: string): Promise<{ status: number; ht
 
 // Firecrawl first (no extra cost when it has credits); fall back to ScrapingBee
 // when Firecrawl is unavailable, errored, or out of credits (HTTP 402).
-async function proxiedFetch(targetUrl: string): Promise<{ status: number; html: string }> {
+//
+// Wrapped in the scrape cache: a non-expired entry for the normalized URL is
+// returned without any proxy call. Only successful scrapes (non-empty html,
+// status < 400) are cached, so a 402/403 is never stored. `force` bypasses the
+// read and overwrites the entry.
+async function proxiedFetch(
+  ctx: any,
+  targetUrl: string,
+  opts?: { force?: boolean },
+): Promise<{ status: number; html: string }> {
+  const urlKey = normalizeListingUrl(targetUrl)
+  if (!opts?.force && urlKey) {
+    try {
+      const cached = await ctx.runQuery(internal.scrapeCache.getCached, { urlKey })
+      if (cached?.html && Date.now() - cached.fetchedAt < SCRAPE_CACHE_TTL_MS) {
+        return { status: cached.status, html: cached.html }
+      }
+    } catch {
+      /* cache read failure is non-fatal — fall through to a live scrape */
+    }
+  }
+
   const fc = await firecrawlFetch(targetUrl)
-  if (fc && fc.html && fc.status < 400) return fc
-  const sb = await scrapingBeeFetch(targetUrl)
-  if (sb && sb.html && sb.status < 400) return sb
-  return fc ?? sb ?? { status: 500, html: '' }
+  let result: { status: number; html: string }
+  if (fc && fc.html && fc.status < 400) {
+    result = fc
+  } else {
+    const sb = await scrapingBeeFetch(targetUrl)
+    if (sb && sb.html && sb.status < 400) result = sb
+    else result = fc ?? sb ?? { status: 500, html: '' }
+  }
+
+  if (urlKey && result.html && result.status < 400) {
+    try {
+      await ctx.runMutation(internal.scrapeCache.putCached, {
+        urlKey,
+        html: result.html,
+        status: result.status,
+      })
+    } catch {
+      /* cache write failure is non-fatal */
+    }
+  }
+  return result
 }
 
 function looksBlocked(html: string, status: number): string | null {
@@ -570,7 +613,10 @@ Strip "S$", "$", commas from numeric values. If the listing says "Studio" use un
   }
 }
 
-async function listingExtractionHandler(_ctx: any, { url }: { url: string }) {
+async function listingExtractionHandler(
+  ctx: any,
+  { url, force }: { url: string; force?: boolean },
+) {
     if (!isSupportedListingUrl(url)) {
       return {
         ok: false,
@@ -583,7 +629,7 @@ async function listingExtractionHandler(_ctx: any, { url }: { url: string }) {
     let html = ''
     let status = 0
     try {
-      const res = await proxiedFetch(url)
+      const res = await proxiedFetch(ctx, url, { force })
       status = res.status
       html = res.html
     } catch (err: any) {
@@ -631,7 +677,7 @@ async function listingExtractionHandler(_ctx: any, { url }: { url: string }) {
 }
 
 export const extractListingUrl = action({
-  args: { url: v.string() },
+  args: { url: v.string(), force: v.optional(v.boolean()) },
   handler: listingExtractionHandler,
 })
 
@@ -639,7 +685,7 @@ export const extractListingUrl = action({
 // frontend bundle (which calls extractPropertyGuruUrl) keep working during the
 // Vercel deploy window. Safe to remove once prod has served the renamed build.
 export const extractPropertyGuruUrl = action({
-  args: { url: v.string() },
+  args: { url: v.string(), force: v.optional(v.boolean()) },
   handler: listingExtractionHandler,
 })
 
@@ -650,12 +696,12 @@ export const extractPropertyGuruUrl = action({
 // not fabricate facilities for unknown condos.
 export const fetchProjectPageText = action({
   args: { url: v.string() },
-  handler: async (_ctx, { url }) => {
+  handler: async (ctx, { url }) => {
     if (!isPropertyGuruUrl(url)) {
       return { ok: false as const, text: '', note: 'Not a PropertyGuru URL' }
     }
     try {
-      const res = await proxiedFetch(url)
+      const res = await proxiedFetch(ctx, url)
       const blocked = looksBlocked(res.html, res.status)
       if (blocked) {
         return { ok: false as const, text: '', note: `Project page ${blocked}` }
