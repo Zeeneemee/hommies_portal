@@ -3189,6 +3189,24 @@ video.listing-hero-img {
 .brief-doneall:hover { background: var(--green); color: #fff; }
 .brief-doneall:active { transform: scale(0.96); }
 
+/* "Hide done" — per-card filter to collapse completed tasks */
+.brief-filterdone {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  border: 1px solid var(--hairline-strong); background: #fff; color: var(--ink-mute);
+  font: inherit; font-size: 11px; font-weight: 800; padding: 2px 9px;
+  border-radius: 999px; cursor: pointer; transition: background 0.14s ease, color 0.14s ease;
+}
+.brief-filterdone:hover { color: var(--ink); border-color: var(--ink-mute); }
+.brief-filterdone.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+
+/* "Carried over" chip on a task pulled forward from an earlier day */
+.brief-carried {
+  display: inline-flex; align-items: center; gap: 2px; margin-left: 6px;
+  font-size: 10px; font-weight: 800; color: var(--orange);
+  background: var(--orange-soft); padding: 1px 6px; border-radius: 999px;
+  vertical-align: middle; white-space: nowrap;
+}
+
 /* ── Assigned Clients — user-maps-client ─────────────────────────────── */
 .brief-alloc-col { border-top: 3px solid var(--hairline); }
 .brief-alloc-col--pool { border-top-color: var(--grey); background: #fff; }

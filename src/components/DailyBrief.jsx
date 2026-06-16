@@ -82,7 +82,12 @@ export default function DailyBrief({ toast }) {
   const day = dayStr(dayMs)
   const isToday = day === dayStr(Date.now())
 
-  const board = useQuery('dailyBrief:boardForDay', { day }) ?? { day, byAssignee: {} }
+  // On today, pull unfinished tasks from earlier days forward; on past days
+  // show that day's snapshot as-is (the completed history).
+  const board = useQuery('dailyBrief:boardForDay', { day, carryForward: isToday }) ?? {
+    day,
+    byAssignee: {},
+  }
 
   const addTask = useMutation('dailyBrief:addTask')
   const setTaskStatus = useMutation('dailyBrief:setTaskStatus')
@@ -255,6 +260,7 @@ function MemberColumn({
   onClearDone,
 }) {
   const [draft, setDraft] = React.useState('')
+  const [hideDone, setHideDone] = React.useState(false)
   const submit = () => {
     const t = draft.trim()
     if (!t) return
@@ -264,6 +270,7 @@ function MemberColumn({
   const open = tasks.filter((t) => t.status !== 'done').length
   const total = tasks.length
   const doneCount = total - open
+  const visible = hideDone ? tasks.filter((t) => t.status !== 'done') : tasks
 
   return (
     <div
@@ -275,6 +282,16 @@ function MemberColumn({
           {member.name.slice(0, 2)}
         </span>
         <span className="brief-col-name">{member.name}</span>
+        {doneCount > 0 && (
+          <button
+            className={`brief-filterdone ${hideDone ? 'on' : ''}`}
+            onClick={() => setHideDone((v) => !v)}
+            title={hideDone ? 'Show completed' : 'Hide completed'}
+          >
+            <Icon name="check" size={11} />
+            {hideDone ? `Show ${doneCount} done` : 'Hide done'}
+          </button>
+        )}
         {open > 0 ? (
           <button
             className="brief-doneall"
@@ -299,7 +316,7 @@ function MemberColumn({
       )}
 
       <div className="brief-tasks">
-        {tasks.map((t) => (
+        {visible.map((t) => (
           <TaskRow key={t._id} task={t} onStatus={onStatus} onUpdate={onUpdate} onRemove={onRemove} />
         ))}
         <div className="brief-check-add">
@@ -340,7 +357,14 @@ function TaskRow({ task, onStatus, onUpdate, onRemove }) {
         >
           {done && <Icon name="check" size={11} />}
         </button>
-        <span className={`brief-task-name ${done ? 'is-done' : ''}`}>{task.title}</span>
+        <span className={`brief-task-name ${done ? 'is-done' : ''}`}>
+          {task.title}
+          {task.carried && (
+            <span className="brief-carried" title={`Carried over from ${prettyDay(task.day)}`}>
+              <Icon name="arrow-right" size={9} /> {dueChip(task.day)}
+            </span>
+          )}
+        </span>
         <button
           type="button"
           className="brief-row-x"

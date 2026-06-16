@@ -16,19 +16,40 @@ const STATUS = v.union(
 
 // All tasks for a day, grouped by assignee key. Returns a map keyed by member
 // so the UI can render one column per teammate without a second query.
+//
+// With `carryForward`, unfinished tasks pinned to *earlier* days also surface
+// in this view so nothing slips through. They keep their original `day` (the
+// completed history stays put on the day it happened) and are flagged
+// `carried: true` so the UI can show where they rolled over from.
 export const boardForDay = query({
-  args: { day: v.optional(v.string()) },
-  handler: async (ctx, { day }) => {
+  args: { day: v.optional(v.string()), carryForward: v.optional(v.boolean()) },
+  handler: async (ctx, { day, carryForward }) => {
     const d = day ?? today()
     const tasks = await ctx.db
       .query('teamTasks')
       .withIndex('by_day', (q) => q.eq('day', d))
       .collect()
+
+    let carried: typeof tasks = []
+    if (carryForward) {
+      const earlier = await ctx.db
+        .query('teamTasks')
+        .withIndex('by_day', (q) => q.lt('day', d))
+        .collect()
+      carried = earlier.filter((t) => t.status !== 'done')
+    }
+
+    const all = [...tasks, ...carried]
     // Newest first within a column.
-    tasks.sort((a, b) => b.createdAt - a.createdAt)
-    const byAssignee: Record<string, typeof tasks> = { fu: [], tt: [], fred: [], robert: [] }
-    for (const t of tasks) {
-      ;(byAssignee[t.assigneeKey] ||= []).push(t)
+    all.sort((a, b) => b.createdAt - a.createdAt)
+    const byAssignee: Record<string, Array<(typeof all)[number] & { carried: boolean }>> = {
+      fu: [],
+      tt: [],
+      fred: [],
+      robert: [],
+    }
+    for (const t of all) {
+      ;(byAssignee[t.assigneeKey] ||= []).push({ ...t, carried: t.day !== d })
     }
     return { day: d, byAssignee }
   },
