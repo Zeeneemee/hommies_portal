@@ -1,6 +1,8 @@
 import React from 'react'
 import { useMutation, useAction } from 'convex/react'
 import { StageTrack, StatusPill, Icon } from './ui.jsx'
+import { renderPosterToBlob } from '../poster/generate.jsx'
+import { resizeImageToJpeg, blobToBase64 } from '../poster/encode.js'
 
 // Screen 2 — every property as a row on the data_received → poster_attached
 // → sent track. The context action advances the lifecycle; for properties
@@ -16,8 +18,10 @@ export default function StatusScreen({ toast, properties }) {
   const setPoster = useMutation('properties:setPoster')
   const generateUploadUrl = useMutation('properties:generateUploadUrl')
   const extractPosterDetails = useAction('extraction:extractPosterDetails')
+  const generatePosterContent = useAction('ai:generatePosterContent')
   const fileRefs = React.useRef({})
   const [extracting, setExtracting] = React.useState(() => new Set())
+  const [generating, setGenerating] = React.useState(() => new Set())
 
   function markExtracting(id, on) {
     setExtracting((prev) => {
@@ -26,6 +30,119 @@ export default function StatusScreen({ toast, properties }) {
       else next.delete(id)
       return next
     })
+  }
+
+  function markGenerating(id, on) {
+    setGenerating((prev) => {
+      const next = new Set(prev)
+      if (on) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  // Build a poster client-side for a property that has no poster yet: Gemini
+  // writes the copy from the photos + details, we render the same <Poster>
+  // template to a PDF, upload it to storage, attach it, and run the usual
+  // extraction so the lifted fields land like a manual upload would.
+  async function generatePosterFor(p) {
+    const missing = []
+    if (!p.condo?.trim()) missing.push('condo name')
+    if (!(typeof p.rentSGD === 'number' && p.rentSGD > 0)) missing.push('rent')
+    if (!p.housingType) missing.push('housing type')
+    if (!(p.images?.length >= 1)) missing.push('at least one image')
+    if (missing.length) {
+      toast(`Need ${missing.join(', ')} first — fill them via Edit on the Listings page, then generate.`)
+      return
+    }
+    markGenerating(p._id, true)
+    try {
+      // 1. Fetch the stored images and re-encode as capped JPEG base64 for Gemini.
+      const inline = []
+      for (const img of p.images.slice(0, 8)) {
+        if (!img?.url) continue
+        try {
+          const res = await fetch(img.url)
+          if (!res.ok) continue
+          const blob = await res.blob()
+          const resized = await resizeImageToJpeg(blob, 1024, 0.82)
+          const dataB64 = await blobToBase64(resized)
+          inline.push({ name: img.name || 'image.jpg', mimeType: 'image/jpeg', dataB64 })
+        } catch {
+          // Skip an image we couldn't read; the rest still go to Gemini.
+        }
+      }
+      if (inline.length === 0) {
+        toast('Could not read any of the property images.')
+        return
+      }
+
+      // 2. Strip to the keys the action's validator accepts.
+      const propertyArg = { condo: p.condo.trim() }
+      if (typeof p.rentSGD === 'number') propertyArg.rentSGD = p.rentSGD
+      if (p.area) propertyArg.area = p.area
+      if (p.buildingType === 'Condo' || p.buildingType === 'HDB') propertyArg.buildingType = p.buildingType
+      if (p.housingType === 'Room' || p.housingType === 'Whole Unit') propertyArg.housingType = p.housingType
+      if (p.unitType) propertyArg.unitType = p.unitType
+      if (typeof p.ageYears === 'number') propertyArg.ageYears = p.ageYears
+      if (p.fullAddress) propertyArg.fullAddress = p.fullAddress
+      if (p.commuteMins && typeof p.commuteMins === 'object') propertyArg.commuteMins = p.commuteMins
+      if (typeof p.sizeSqft === 'number') propertyArg.sizeSqft = p.sizeSqft
+      if (typeof p.bedrooms === 'number') propertyArg.bedrooms = p.bedrooms
+      if (typeof p.bathrooms === 'number') propertyArg.bathrooms = p.bathrooms
+      if (p.furnishing) propertyArg.furnishing = p.furnishing
+      if (p.availability) propertyArg.availability = p.availability
+      if (p.listingTitle) propertyArg.listingTitle = p.listingTitle
+
+      // 3. Gemini → structured poster content.
+      const res = await generatePosterContent({
+        property: propertyArg,
+        images: inline,
+        projectUrl: p.listingUrl || undefined,
+      })
+      if (!res?.ok || !res.content) {
+        toast(`Poster generation failed: ${res?.note || 'no content'}`)
+        return
+      }
+
+      // 4. Render the PDF from the stored image URLs (Poster reads img.url).
+      const posterProperty = {
+        ...propertyArg,
+        images: (p.images || []).map((i) => ({ url: i.url })),
+        listingUrl: p.listingUrl || undefined,
+      }
+      const { blob, filename } = await renderPosterToBlob(posterProperty, res.content, 'NUS')
+
+      // 5. Upload + attach.
+      const uploadUrl = await generateUploadUrl()
+      const up = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/pdf' },
+        body: blob,
+      })
+      if (!up.ok) throw new Error('upload failed')
+      const { storageId } = await up.json()
+      await setPoster({ id: p._id, storageId, name: filename, size: blob.size })
+
+      // 6. Lift fields back out of the freshly attached poster.
+      markExtracting(p._id, true)
+      try {
+        const ex = await extractPosterDetails({ id: p._id })
+        if (ex?.ok) {
+          toast(`Poster generated & attached — extracted ${ex.liftedFields.length} field${ex.liftedFields.length === 1 ? '' : 's'}.`)
+        } else {
+          toast('Poster generated & attached — extraction found no fields.')
+        }
+      } catch (err) {
+        toast(`Poster generated & attached — extraction failed: ${err.message || err}`)
+      } finally {
+        markExtracting(p._id, false)
+      }
+    } catch (err) {
+      toast(`Generate failed: ${err.message || err}`)
+    } finally {
+      markGenerating(p._id, false)
+    }
   }
 
   const counts = {
@@ -159,6 +276,7 @@ export default function StatusScreen({ toast, properties }) {
         )}
         {properties.map((p) => {
           const isExtracting = extracting.has(p._id)
+          const isGenerating = generating.has(p._id)
           return (
             <div className="status-row" key={p._id}>
               <div className="row-name">
@@ -179,9 +297,24 @@ export default function StatusScreen({ toast, properties }) {
                 )}
               </div>
               <div className="row-actions">
-                <button className="btn btn-ghost btn-sm" onClick={() => handleAction(p)}>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => handleAction(p)}
+                  disabled={isGenerating}
+                >
                   {actionLabel(p)}
                 </button>
+                {p.status === 'data_received' && !p.posterStorageId && (
+                  <button
+                    className="btn btn-ghost btn-sm row-actions__extract"
+                    onClick={() => generatePosterFor(p)}
+                    disabled={isGenerating || isExtracting}
+                    title="Generate a poster PDF from this property's photos and details, then attach it"
+                  >
+                    <Icon name="sparkle" size={11} />
+                    {isGenerating ? ' Generating…' : ' Generate poster'}
+                  </button>
+                )}
                 {p.posterStorageId && (
                   <button
                     className="btn btn-ghost btn-sm row-actions__extract"
