@@ -17,9 +17,10 @@ const STATUS = v.union(
 // All tasks for a day, grouped by assignee key. Returns a map keyed by member
 // so the UI can render one column per teammate without a second query.
 //
-// With `carryForward`, unfinished tasks pinned to *earlier* days also surface
-// in this view so nothing slips through. They keep their original `day` (the
-// completed history stays put on the day it happened) and are flagged
+// With `carryForward`, *every* still-open task surfaces in this view no matter
+// which day it was pinned to (past or future) — so the board is the team's full
+// to-do list, not just today's slice. Carried tasks keep their original `day`
+// (the completed history stays put on the day it happened) and are flagged
 // `carried: true` so the UI can show where they rolled over from.
 export const boardForDay = query({
   args: { day: v.optional(v.string()), carryForward: v.optional(v.boolean()) },
@@ -32,11 +33,10 @@ export const boardForDay = query({
 
     let carried: typeof tasks = []
     if (carryForward) {
-      const earlier = await ctx.db
-        .query('teamTasks')
-        .withIndex('by_day', (q) => q.lt('day', d))
-        .collect()
-      carried = earlier.filter((t) => t.status !== 'done')
+      // All open tasks from any other day. (No status index, so scan + filter;
+      // fine at team scale — done tasks stay on their own day's view.)
+      const everything = await ctx.db.query('teamTasks').collect()
+      carried = everything.filter((t) => t.day !== d && t.status !== 'done')
     }
 
     const all = [...tasks, ...carried]
