@@ -7,8 +7,9 @@
 //   /add <title>             add a todo to yourself for today
 //   /add @user <title>       assign a todo to a teammate for today
 //   /add_tasks [@user]       bulk add — one task per bulleted line (newline/•/;)
-//   /today                   list your tasks for today (numbered)
-//   /today @user             peek at a teammate's tasks for today
+//   /today                   list your open to-do — all unfinished tasks across
+//                            days, plus today's (numbered)
+//   /today @user             peek at a teammate's open to-do
 //   /done <n>                mark your own task #n (from /today) done
 //   /done 1 3 5              mark several tasks done at once
 //   /done all                mark all your open tasks done
@@ -46,20 +47,29 @@ const STATUS_MARK: Record<string, string> = {
   blocked: '[!]',
 }
 
-async function tasksForToday(ctx: any, assigneeKey: string): Promise<Doc<'teamTasks'>[]> {
+// The teammate's working list: every task pinned to today (any status) plus all
+// still-open tasks from any other day — the same set the portal's Daily Brief
+// board shows. Sorted oldest-first so the numbering stays stable for /done and
+// /delete.
+async function taskListFor(ctx: any, assigneeKey: string): Promise<Doc<'teamTasks'>[]> {
   const d = today()
   const rows = await ctx.db
     .query('teamTasks')
-    .withIndex('by_assignee_day', (q: any) => q.eq('assigneeKey', assigneeKey).eq('day', d))
+    .withIndex('by_assignee_day', (q: any) => q.eq('assigneeKey', assigneeKey))
     .collect()
-  // Stable ascending order so the numbering in /today matches /done <n>.
-  return rows.sort((a: Doc<'teamTasks'>, b: Doc<'teamTasks'>) => a.createdAt - b.createdAt)
+  return rows
+    .filter((t: Doc<'teamTasks'>) => t.day === d || t.status !== 'done')
+    .sort((a: Doc<'teamTasks'>, b: Doc<'teamTasks'>) => a.createdAt - b.createdAt)
 }
 
 function renderList(name: string, tasks: Doc<'teamTasks'>[]): string {
-  if (tasks.length === 0) return `${name} has no tasks for today.`
-  const lines = tasks.map((t, i) => `${i + 1}. ${STATUS_MARK[t.status] || '[ ]'} ${t.title}`)
-  return `${name} — today:\n${lines.join('\n')}`
+  if (tasks.length === 0) return `${name} has no open tasks.`
+  const d = today()
+  const lines = tasks.map((t, i) => {
+    const from = t.day !== d ? ` (from ${t.day})` : ''
+    return `${i + 1}. ${STATUS_MARK[t.status] || '[ ]'} ${t.title}${from}`
+  })
+  return `${name} — to-do:\n${lines.join('\n')}`
 }
 
 // Split a bulleted block into individual task titles. Tasks may be separated by
@@ -222,12 +232,12 @@ export const handleCommand = internalMutation({
           return `No teammate with username @${targetName}.`
         }
         const who = target ?? member
-        const tasks = await tasksForToday(ctx, who.key)
+        const tasks = await taskListFor(ctx, who.key)
         return renderList(who.name, tasks)
       }
 
       case '/done': {
-        const tasks = await tasksForToday(ctx, member.key)
+        const tasks = await taskListFor(ctx, member.key)
         // "/done all" marks every open task done.
         if (rest.trim().toLowerCase() === 'all') {
           let changed = 0
@@ -271,7 +281,7 @@ export const handleCommand = internalMutation({
       // Delete one or more of your own tasks by number, e.g. /delete 2  or  /delete 1 3.
       case '/delete':
       case '/del': {
-        const tasks = await tasksForToday(ctx, member.key)
+        const tasks = await taskListFor(ctx, member.key)
         const nums = (rest.match(/\d+/g) || []).map(Number).filter((n) => n >= 1)
         if (nums.length === 0) return 'Usage: /delete <number> (numbers from /today).'
         const deleted: string[] = []
@@ -296,7 +306,7 @@ export const handleCommand = internalMutation({
       // Remove all your done tasks for today.
       case '/clear':
       case '/cleardone': {
-        const tasks = await tasksForToday(ctx, member.key)
+        const tasks = await taskListFor(ctx, member.key)
         let removed = 0
         for (const t of tasks) {
           if (t.status === 'done') {
@@ -398,8 +408,8 @@ export const handleCommand = internalMutation({
           '/add <task> — add a todo to yourself',
           '/add @username <task> — assign to a teammate',
           '/add_tasks [@username] then bulleted lines — add many at once',
-          '/today — your tasks (numbered)',
-          '/today @username — a teammate\'s tasks',
+          '/today — your open to-do, all days (numbered)',
+          '/today @username — a teammate\'s open to-do',
           '/done <n> — mark your task #n done',
           '/done 1 3 5 — mark several done',
           '/done all — mark all your tasks done',

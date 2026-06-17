@@ -344,6 +344,7 @@ function MemberColumn({
 function TaskRow({ task, onStatus, onUpdate, onRemove }) {
   const done = task.status === 'done'
   const [editingDue, setEditingDue] = React.useState(false)
+  const [editingTitle, setEditingTitle] = React.useState(false)
   const meta = STATUS_META[task.status]
 
   return (
@@ -357,14 +358,40 @@ function TaskRow({ task, onStatus, onUpdate, onRemove }) {
         >
           {done && <Icon name="check" size={11} />}
         </button>
-        <span className={`brief-task-name ${done ? 'is-done' : ''}`}>
-          {task.title}
-          {task.carried && (
-            <span className="brief-carried" title={`Carried over from ${prettyDay(task.day)}`}>
-              <Icon name="arrow-right" size={9} /> {dueChip(task.day)}
-            </span>
-          )}
-        </span>
+        {editingTitle ? (
+          <input
+            autoFocus
+            className="brief-title-input"
+            defaultValue={task.title}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                e.target.blur()
+              } else if (e.key === 'Escape') {
+                e.target.value = task.title // cancel — blur then sees no change
+                setEditingTitle(false)
+              }
+            }}
+            onBlur={(e) => {
+              setEditingTitle(false)
+              const v = e.target.value.trim()
+              if (v && v !== task.title) onUpdate(task._id, { title: v })
+            }}
+          />
+        ) : (
+          <span
+            className={`brief-task-name ${done ? 'is-done' : ''}`}
+            onClick={() => setEditingTitle(true)}
+            title="Click to edit"
+          >
+            {task.title}
+            {task.carried && (
+              <span className="brief-carried" title={`Carried over from ${prettyDay(task.day)}`}>
+                <Icon name="arrow-right" size={9} /> {dueChip(task.day)}
+              </span>
+            )}
+          </span>
+        )}
         <button
           type="button"
           className="brief-row-x"

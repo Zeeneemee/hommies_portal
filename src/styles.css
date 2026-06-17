@@ -3063,8 +3063,12 @@ video.listing-hero-img {
 .brief-task-row--green { border-left-color: var(--green); }
 .brief-task-row--red { border-left-color: var(--danger); }
 .brief-task-main { display: flex; align-items: center; gap: 9px; }
-.brief-task-name { flex: 1; font-size: 13px; font-weight: 700; color: var(--ink); }
+.brief-task-name { flex: 1; font-size: 13px; font-weight: 700; color: var(--ink); cursor: text; }
 .brief-task-name.is-done { text-decoration: line-through; color: var(--ink-mute); font-weight: 600; }
+.brief-title-input {
+  flex: 1; border: none; border-bottom: 1px solid var(--orange); background: none;
+  font: inherit; font-size: 13px; font-weight: 700; color: var(--ink); padding: 1px 0; outline: none;
+}
 .brief-task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 5px; padding-left: 27px; }
 
 .brief-meta-chip {
