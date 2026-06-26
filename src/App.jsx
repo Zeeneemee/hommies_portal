@@ -8,6 +8,7 @@ import RecommendScreen from './components/Recommend.jsx'
 import ListingsScreen from './components/Listings.jsx'
 import CustomersScreen from './components/Customers.jsx'
 import CustomerDetail from './components/CustomerDetail.jsx'
+import RequirementSearch from './components/RequirementSearch.jsx'
 import SalesScreen from './components/Sales.jsx'
 import PipelineScreen from './components/Pipeline.jsx'
 import DailyBrief from './components/DailyBrief.jsx'
@@ -32,18 +33,16 @@ function ScrollToTop() {
   return null
 }
 
+// Sidebar order. Pipeline, Sales, and the chat-intake beta still have routes
+// below but are intentionally hidden from the sidebar.
 const NAV = [
-  { id: 'brief', to: '/brief', label: 'Daily Brief', step: '◆' },
-  { id: 'add', to: '/add', label: 'Add Property', step: 1 },
-  ...(CHAT_INTAKE_ENABLED
-    ? [{ id: 'add-chat', to: '/add/chat', label: 'Add (chat) · beta', step: '★' }]
-    : []),
-  { id: 'status', to: '/status', label: 'Status', step: 2 },
-  { id: 'recommend', to: '/recommend', label: 'Recommend', step: 3 },
-  { id: 'listings', to: '/listings', label: 'Listings', step: 4 },
-  { id: 'customers', to: '/customers', label: 'Customers', step: 5 },
-  { id: 'pipeline', to: '/pipeline', label: 'Pipeline', step: 6 },
-  { id: 'sales', to: '/sales', label: 'Sales', step: 7 },
+  { id: 'brief', to: '/brief', label: 'Daily Brief', step: 1 },
+  { id: 'add', to: '/add', label: 'Add Property', step: 2 },
+  { id: 'status', to: '/status', label: 'Status', step: 3 },
+  { id: 'find-send', to: '/find-send', label: 'Find & Send', step: 4 },
+  { id: 'recommend', to: '/recommend', label: 'Recommend', step: 5 },
+  { id: 'listings', to: '/listings', label: 'Listings', step: 6 },
+  { id: 'customers', to: '/customers', label: 'Customers', step: 7 },
 ]
 
 // Add-Property draft, held at the App level so it survives sidebar
@@ -186,6 +185,7 @@ export default function App() {
     'add-chat': '',
     status: properties.length,
     recommend: responses.length,
+    'find-send': '',
     listings: properties.length,
     customers: responses.length,
     pipeline: inFlightDealCount,
@@ -312,6 +312,7 @@ export default function App() {
               <RecommendScreen toast={toast} properties={properties} responses={responses} />
             }
           />
+          <Route path="/find-send" element={<RequirementSearch toast={toast} />} />
           <Route path="/listings" element={<ListingsScreen properties={properties} toast={toast} />} />
           <Route
             path="/customers"

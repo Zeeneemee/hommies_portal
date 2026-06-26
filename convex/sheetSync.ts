@@ -61,7 +61,7 @@ function parseBudget(s: unknown): { min: number; max: number } {
   return { min: sorted[0], max: sorted[sorted.length - 1] }
 }
 
-function parseSchool(s: unknown): string {
+export function parseSchool(s: unknown): string {
   const u = String(s ?? '').toUpperCase()
   if (u.includes('NUS')) return 'NUS'
   if (u.includes('NTU')) return 'NTU'
@@ -69,14 +69,14 @@ function parseSchool(s: unknown): string {
   return 'OTHER'
 }
 
-function parseBuildingType(s: unknown): string {
+export function parseBuildingType(s: unknown): string {
   const u = String(s ?? '').toLowerCase()
   if (u.includes('hdb') || u.includes('組屋') || u.includes('组屋')) return 'HDB'
   if (u.includes('condo') || u.includes('公寓')) return 'Condo'
   return 'Any'
 }
 
-function parseHousingType(s: unknown): 'Room' | 'Whole Unit' {
+export function parseHousingType(s: unknown): 'Room' | 'Whole Unit' {
   const u = String(s ?? '').toLowerCase()
   if (u.includes('whole') || u.includes('整層') || u.includes('整间') || u.includes('整套')) {
     return 'Whole Unit'
@@ -84,7 +84,7 @@ function parseHousingType(s: unknown): 'Room' | 'Whole Unit' {
   return 'Room'
 }
 
-function parseLayouts(s: unknown): string[] {
+export function parseLayouts(s: unknown): string[] {
   const u = String(s ?? '')
   const out: string[] = []
   if (/common/i.test(u) || /普通/.test(u)) out.push('Common Room')

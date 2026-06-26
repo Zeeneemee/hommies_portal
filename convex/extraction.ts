@@ -358,7 +358,7 @@ async function scrapingBeeFetch(targetUrl: string): Promise<{ status: number; ht
 // returned without any proxy call. Only successful scrapes (non-empty html,
 // status < 400) are cached, so a 402/403 is never stored. `force` bypasses the
 // read and overwrites the entry.
-async function proxiedFetch(
+export async function proxiedFetch(
   ctx: any,
   targetUrl: string,
   opts?: { force?: boolean },
